@@ -37,16 +37,6 @@ author: Your Name
 Recipe content goes here...
 ```
 
-### Available Tags
-
-**Integration**: `turnkey`, `byo-llm`, `byo-stt`, `livekit`, `agora`
-
-**Use Case**: `customer-support`, `sales`, `education`, `healthcare`
-
-**SDK**: `javascript`, `python`, `react`, `react-native`
-
-**Feature**: `rag`, `tools`, `interruption`, `multilingual`
-
 ### MDX Components
 
 Use these components in your recipes:
