@@ -1,0 +1,233 @@
+---
+title: RAG Knowledge Base
+description: Give your avatar domain-specific knowledge using retrieval-augmented generation.
+tags: [rag, turnkey, tools, intermediate]
+difficulty: intermediate
+sdk: javascript
+date: 2025-01-17
+author: Anam Team
+---
+
+# RAG Knowledge Base
+
+This recipe shows how to give your avatar access to domain-specific knowledge using Anam's built-in RAG (Retrieval-Augmented Generation) capabilities.
+
+## Overview
+
+With RAG, your avatar can:
+- Answer questions about your products, services, or documentation
+- Stay grounded in factual information
+- Cite sources for its responses
+- Handle questions outside its training data
+
+## Method 1: Anam's Built-in Knowledge Tool
+
+The simplest approach is using Anam's managed knowledge base.
+
+### Step 1: Create a Knowledge Folder
+
+```typescript
+const folder = await fetch('https://api.anam.ai/v1/knowledge', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
+  },
+  body: JSON.stringify({
+    name: 'Product Documentation',
+    description: 'Company product docs and FAQs',
+  }),
+});
+
+const { id: folderId } = await folder.json();
+```
+
+### Step 2: Upload Documents
+
+Upload your knowledge documents (PDF, TXT, MD, DOCX):
+
+```typescript
+const formData = new FormData();
+formData.append('file', documentFile);
+
+await fetch(`https://api.anam.ai/v1/knowledge/${folderId}/documents`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
+  },
+  body: formData,
+});
+```
+
+### Step 3: Create a Knowledge Tool
+
+Link the knowledge folder to a tool that your persona can use:
+
+```typescript
+const tool = await fetch('https://api.anam.ai/v1/tools', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
+  },
+  body: JSON.stringify({
+    name: 'search_docs',
+    type: 'server_rag',
+    description: 'Search product documentation to answer customer questions',
+    config: {
+      knowledge_folder_id: folderId,
+      top_k: 5, // Number of chunks to retrieve
+    },
+  }),
+});
+```
+
+### Step 4: Attach to Your Persona
+
+Update your persona to use the knowledge tool:
+
+```typescript
+await fetch(`https://api.anam.ai/v1/personas/${personaId}`, {
+  method: 'PATCH',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
+  },
+  body: JSON.stringify({
+    tool_ids: [toolId],
+    system_prompt: `You are a helpful product support agent.
+When answering questions about our products, always use the search_docs tool to find accurate information.
+If you can't find the answer in the documentation, say so honestly.`,
+  }),
+});
+```
+
+<Tip>
+Update your system prompt to instruct the avatar when and how to use the knowledge tool.
+</Tip>
+
+## Method 2: BYO RAG with Custom LLM
+
+For more control, implement RAG in your own backend:
+
+```typescript
+import { AnamClient } from '@anam-ai/js-sdk';
+import { OpenAI } from 'openai';
+import { PineconeClient } from '@pinecone-database/pinecone';
+
+const openai = new OpenAI();
+const pinecone = new PineconeClient();
+
+async function searchKnowledge(query: string) {
+  // Generate embedding for the query
+  const embedding = await openai.embeddings.create({
+    model: 'text-embedding-3-small',
+    input: query,
+  });
+
+  // Search vector database
+  const index = pinecone.Index('product-docs');
+  const results = await index.query({
+    vector: embedding.data[0].embedding,
+    topK: 5,
+    includeMetadata: true,
+  });
+
+  return results.matches.map((m) => m.metadata.text);
+}
+
+// In your message handler
+client.on('userTranscript', async ({ text }) => {
+  // Retrieve relevant context
+  const context = await searchKnowledge(text);
+
+  // Generate response with context
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a helpful assistant. Use the following context to answer questions:
+
+${context.join('\n\n')}
+
+If the context doesn't contain relevant information, say you don't know.`,
+      },
+      { role: 'user', content: text },
+    ],
+  });
+
+  client.sendMessage(response.choices[0].message.content);
+});
+```
+
+## Best Practices
+
+### Chunk Your Documents Effectively
+
+```typescript
+// Good: Semantic chunking with overlap
+const chunks = splitDocument(document, {
+  chunkSize: 500,    // ~500 tokens per chunk
+  overlap: 50,       // Overlap for context continuity
+  splitOn: 'paragraph', // Respect semantic boundaries
+});
+```
+
+### Include Metadata
+
+```typescript
+// Store useful metadata with each chunk
+const chunkWithMetadata = {
+  text: chunk,
+  metadata: {
+    source: 'product-manual-v2.pdf',
+    page: 15,
+    section: 'Troubleshooting',
+    lastUpdated: '2025-01-15',
+  },
+};
+```
+
+### Prompt Engineering for RAG
+
+```typescript
+const systemPrompt = `You are a product support specialist.
+
+INSTRUCTIONS:
+1. Always search the knowledge base before answering product questions
+2. If you find relevant information, cite the source
+3. If the knowledge base doesn't have the answer, say "I don't have that information in my documentation, but I can help you contact support"
+4. Never make up product specifications or features
+
+TONE: Friendly, professional, concise`;
+```
+
+<Warning>
+Always instruct your avatar to acknowledge when it doesn't have information rather than hallucinating answers.
+</Warning>
+
+## Testing Your RAG Setup
+
+Test with questions that require knowledge retrieval:
+
+```typescript
+const testQuestions = [
+  'What are the product dimensions?',        // Should retrieve from docs
+  'How do I reset my password?',             // Should retrieve from docs
+  'What is the meaning of life?',            // Should acknowledge no relevant docs
+  'Compare your product to CompetitorX',     // Should use docs if available
+];
+
+for (const question of testQuestions) {
+  console.log(`Q: ${question}`);
+  client.sendMessage(question);
+  // Verify response uses knowledge base appropriately
+}
+```
+
+## Next Steps
+
+- [Add webhook tools](/webhook-tools) - Let your avatar call external APIs
+- [Implement caching](/rag-caching) - Cache frequent queries for faster responses
+- [Monitor retrieval quality](/rag-monitoring) - Track and improve retrieval accuracy

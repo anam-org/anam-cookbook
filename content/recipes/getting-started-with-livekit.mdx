@@ -1,0 +1,215 @@
+---
+title: Getting Started with LiveKit
+description: Add AI avatars to your LiveKit agent applications using the Anam plugin for Python.
+tags: [livekit, python, agents]
+difficulty: intermediate
+sdk: python
+date: 2025-01-19
+author: Anam Team
+---
+
+# Getting Started with LiveKit
+
+This recipe shows you how to integrate Anam avatars into your LiveKit agent applications. The Anam LiveKit plugin works as a visual layer alongside any STT, LLM, or TTS provider—OpenAI Realtime, Gemini Live, or your own custom models.
+
+## How It Works
+
+With the LiveKit integration, Anam handles only the avatar rendering while you control the intelligence:
+
+```
+User voice → LiveKit room → Your LLM → Text response → Anam avatar → User sees/hears avatar
+```
+
+This "Bring Your Own LLM" approach gives you full control over the conversation logic while Anam provides the visual presence.
+
+## Prerequisites
+
+- An Anam account with API key ([get one at lab.anam.ai](https://lab.anam.ai))
+- A LiveKit Cloud account ([livekit.io](https://livekit.io))
+- Python 3.9+
+- An LLM provider (OpenAI, Google Gemini, etc.)
+
+## Step 1: Install the Plugin
+
+Install the Anam LiveKit plugin:
+
+```bash
+pip install livekit-plugins-anam
+```
+
+You'll also need the LiveKit agents framework and your LLM provider's plugin:
+
+```bash
+pip install livekit-agents livekit-plugins-openai
+```
+
+## Step 2: Set Up Environment Variables
+
+Create a `.env` file with your credentials:
+
+```bash
+# Anam
+ANAM_API_KEY=your_anam_api_key
+
+# LiveKit
+LIVEKIT_URL=wss://your-app.livekit.cloud
+LIVEKIT_API_KEY=your_livekit_api_key
+LIVEKIT_API_SECRET=your_livekit_api_secret
+
+# OpenAI (or your LLM provider)
+OPENAI_API_KEY=your_openai_api_key
+```
+
+## Step 3: Configure the Avatar
+
+Set up your avatar using `PersonaConfig`:
+
+```python
+from livekit.plugins import anam
+
+persona_config = anam.PersonaConfig(
+    name="Maya",
+    avatarId="your-avatar-id",  # From Anam Lab
+)
+```
+
+<Tip>
+Find your avatar ID in the Anam Lab dashboard under Avatars. Each avatar has a unique UUID.
+</Tip>
+
+## Step 4: Create the Agent
+
+Here's a complete example using OpenAI Realtime:
+
+```python
+import asyncio
+from dotenv import load_dotenv
+from livekit import rtc
+from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli
+from livekit.agents.multimodal import MultimodalAgent
+from livekit.plugins import anam, openai
+
+load_dotenv()
+
+async def entrypoint(ctx: JobContext):
+    # Connect to the LiveKit room
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+
+    # Wait for a participant to join
+    participant = await ctx.wait_for_participant()
+
+    # Configure the Anam avatar
+    persona_config = anam.PersonaConfig(
+        name="Maya",
+        avatarId="your-avatar-id",
+    )
+
+    # Create the OpenAI Realtime model
+    model = openai.realtime.RealtimeModel(
+        instructions="You are a helpful assistant named Maya.",
+        voice="shimmer",
+    )
+
+    # Create the multimodal agent
+    agent = MultimodalAgent(model=model)
+    agent.start(ctx.room, participant)
+
+    # Initialize the Anam avatar
+    anam_avatar = anam.Avatar(persona_config=persona_config)
+
+    # Start the avatar (connects to the LiveKit room)
+    await anam_avatar.start(
+        agent_session=agent.agent_session,
+        room=ctx.room,
+    )
+
+    # Generate an initial greeting
+    await agent.agent_session.generate_reply()
+
+
+if __name__ == "__main__":
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+```
+
+## Step 5: Run the Agent
+
+Start the agent in development mode:
+
+```bash
+python agent.py dev
+```
+
+This launches the LiveKit CLI which will connect to your LiveKit Cloud instance.
+
+<Info>
+In development mode, the agent automatically reloads when you make code changes.
+</Info>
+
+## Adding Vision Capabilities
+
+You can enable screen sharing analysis with Gemini:
+
+```python
+from livekit.plugins import google
+
+# Create Gemini model with vision
+model = google.beta.realtime.RealtimeModel(
+    instructions="You can see the user's screen. Describe what you see when asked.",
+)
+
+# Enable video sampling for screen analysis
+sampler = anam.VoiceActivityVideoSampler(
+    speaking_fps=0.2,  # Sample rate while speaking
+    silent_fps=0.1,    # Sample rate while silent
+)
+```
+
+## Adding Function Tools
+
+Extend your avatar with custom actions:
+
+```python
+from livekit.agents import function_tool
+
+@function_tool
+async def fill_form(field_name: str, value: str):
+    """Fill a form field with a value."""
+    # Your form filling logic here
+    return f"Filled {field_name} with {value}"
+
+# Add to your model
+model = openai.realtime.RealtimeModel(
+    instructions="You can help users fill out forms.",
+    tools=[fill_form],
+)
+```
+
+## Troubleshooting
+
+**Avatar not appearing:**
+- Verify your `ANAM_API_KEY` is valid
+- Check that the `avatarId` exists in your Anam Lab account
+
+**No voice response:**
+- Confirm your LLM provider credentials are correct
+- Check microphone permissions in the browser
+
+**Screen share not working:**
+- Ensure browser has screen sharing permissions
+- Verify `video_enabled=True` in your configuration
+
+## Production Deployment
+
+For production, deploy without the `dev` flag:
+
+```bash
+python agent.py
+```
+
+Use Docker or Kubernetes for containerized deployments. See the [LiveKit deployment docs](https://docs.livekit.io/agents/deployment/) for details.
+
+## Next Steps
+
+- [Bring Your Own LLM](/byo-llm-integration) - Learn more about custom LLM integrations
+- [RAG Knowledge Base](/rag-knowledge-base) - Add domain-specific knowledge to your avatar
+- [LiveKit Agents Docs](https://docs.livekit.io/agents/) - Full LiveKit agents documentation

@@ -1,0 +1,249 @@
+---
+title: Custom LLM
+description: Use your own language model while Anam handles speech-to-text, text-to-speech, and avatar rendering.
+tags: [custom-llm, javascript, intermediate]
+difficulty: intermediate
+sdk: javascript
+date: 2025-01-18
+author: Anam Team
+---
+
+# Custom LLM
+
+This recipe shows how to integrate your own language model with Anam. You maintain full control over the conversation logic while Anam handles the real-time avatar experience.
+
+## How It Works
+
+In BYO LLM mode:
+1. Anam transcribes user speech → sends you the text
+2. You process with your LLM → send back the response
+3. Anam speaks the response through the avatar
+
+This gives you complete control over:
+- Conversation logic and context
+- RAG/retrieval systems
+- Tool calling and function execution
+- Response filtering and guardrails
+
+## Prerequisites
+
+- Anam account with API key
+- Your LLM endpoint (OpenAI, Anthropic, self-hosted, etc.)
+- Node.js 18+
+
+## Step 1: Create a BYO LLM Persona
+
+First, create a persona configured for BYO LLM mode in Anam Lab, or via the API:
+
+```typescript
+const persona = await fetch('https://api.anam.ai/v1/personas', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
+  },
+  body: JSON.stringify({
+    name: 'My BYO LLM Agent',
+    avatar_id: 'eva_frontend_v1',
+    voice_id: 'cartesia-british-female',
+    brain_type: 'CUSTOMER_CLIENT_V1', // This enables BYO LLM mode
+  }),
+});
+```
+
+<Info>
+The `brain_type: 'CUSTOMER_CLIENT_V1'` is the key setting that enables BYO LLM mode.
+</Info>
+
+## Step 2: Set Up the Message Handler
+
+Configure your client to receive transcriptions and send responses:
+
+```typescript
+import { AnamClient } from '@anam-ai/js-sdk';
+import OpenAI from 'openai';
+
+const openai = new OpenAI();
+const conversationHistory: Array<{ role: string; content: string }> = [];
+
+const client = new AnamClient({
+  sessionToken: sessionToken,
+});
+
+// Listen for user speech transcriptions
+client.on('userTranscript', async (transcript) => {
+  console.log('User said:', transcript.text);
+
+  // Add to conversation history
+  conversationHistory.push({
+    role: 'user',
+    content: transcript.text,
+  });
+
+  // Get response from your LLM
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      ...conversationHistory,
+    ],
+  });
+
+  const assistantMessage = response.choices[0].message.content;
+
+  // Add to history
+  conversationHistory.push({
+    role: 'assistant',
+    content: assistantMessage,
+  });
+
+  // Send to Anam for avatar to speak
+  client.sendMessage(assistantMessage);
+});
+```
+
+## Step 3: Handle Streaming Responses
+
+For better latency, stream your LLM responses:
+
+```typescript
+client.on('userTranscript', async (transcript) => {
+  conversationHistory.push({ role: 'user', content: transcript.text });
+
+  const stream = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      ...conversationHistory,
+    ],
+    stream: true,
+  });
+
+  let fullResponse = '';
+
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content || '';
+    fullResponse += content;
+
+    // Stream chunks to Anam as they arrive
+    if (content) {
+      client.streamMessageChunk(content);
+    }
+  }
+
+  // Signal end of message
+  client.endMessageStream();
+
+  conversationHistory.push({ role: 'assistant', content: fullResponse });
+});
+```
+
+<Tip>
+Streaming responses significantly reduces perceived latency. The avatar starts speaking as soon as the first tokens arrive.
+</Tip>
+
+## Step 4: Add Tool Calling
+
+You can implement tool calling entirely in your LLM logic:
+
+```typescript
+const tools = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description: 'Get current weather for a location',
+      parameters: {
+        type: 'object',
+        properties: {
+          location: { type: 'string', description: 'City name' },
+        },
+        required: ['location'],
+      },
+    },
+  },
+];
+
+client.on('userTranscript', async (transcript) => {
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: conversationHistory,
+    tools,
+  });
+
+  const message = response.choices[0].message;
+
+  if (message.tool_calls) {
+    // Execute tool calls
+    for (const toolCall of message.tool_calls) {
+      if (toolCall.function.name === 'get_weather') {
+        const args = JSON.parse(toolCall.function.arguments);
+        const weather = await getWeather(args.location);
+
+        // Add tool result to conversation
+        conversationHistory.push({
+          role: 'tool',
+          content: JSON.stringify(weather),
+          tool_call_id: toolCall.id,
+        });
+      }
+    }
+
+    // Get final response with tool results
+    const finalResponse = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: conversationHistory,
+    });
+
+    client.sendMessage(finalResponse.choices[0].message.content);
+  } else {
+    client.sendMessage(message.content);
+  }
+});
+```
+
+## Complete Example
+
+```typescript
+import { AnamClient } from '@anam-ai/js-sdk';
+import Anthropic from '@anthropic-ai/sdk';
+
+const anthropic = new Anthropic();
+
+async function startBYOLLMSession() {
+  const client = new AnamClient({
+    sessionToken: await getSessionToken(),
+  });
+
+  const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+  client.on('userTranscript', async ({ text, isFinal }) => {
+    // Only process final transcripts
+    if (!isFinal) return;
+
+    history.push({ role: 'user', content: text });
+
+    // Use Claude for responses
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: 'You are a friendly customer support agent for an e-commerce site.',
+      messages: history,
+    });
+
+    const assistantMessage = response.content[0].text;
+    history.push({ role: 'assistant', content: assistantMessage });
+
+    client.sendMessage(assistantMessage);
+  });
+
+  const video = document.getElementById('avatar') as HTMLVideoElement;
+  await client.streamToVideoElement(video);
+}
+```
+
+## Next Steps
+
+- [Add RAG to your LLM](/rag-knowledge-base) - Ground responses in your documentation
+- [Implement guardrails](/llm-guardrails) - Add safety filters to responses
+- [Handle interruptions](/handling-interruptions) - Cancel in-flight responses when users interrupt

@@ -1,0 +1,293 @@
+---
+title: ElevenLabs Agents with Anam
+description: Combine ElevenLabs Conversational AI with Anam avatars for voice agents with real-time lip-sync.
+tags: [agents, javascript]
+difficulty: intermediate
+sdk: javascript
+date: 2025-01-19
+author: Anam Team
+---
+
+# ElevenLabs Agents with Anam
+
+This recipe shows you how to combine ElevenLabs Conversational AI with Anam avatars to create engaging voice agents with real-time lip-sync.
+
+## How It Works
+
+This integration uses Anam's **audio passthrough mode**. Instead of using Anam's built-in STT/LLM/TTS pipeline, you send audio from ElevenLabs directly to the avatar for lip-syncing:
+
+```
+User voice → ElevenLabs agent → Audio response → Anam avatar (lip-sync) → User sees talking avatar
+```
+
+ElevenLabs handles the conversation intelligence and voice synthesis, while Anam renders the visual avatar synchronized to the audio.
+
+<Warning>
+The audio passthrough mode is currently in beta. APIs may change as we continue to improve the integration.
+</Warning>
+
+## Prerequisites
+
+- An ElevenLabs account with a configured Conversational AI agent
+- An Anam account with API key ([lab.anam.ai](https://lab.anam.ai))
+- Node.js 18+ or Bun
+
+## Step 1: Install Dependencies
+
+```bash
+npm install @anam-ai/js-sdk chatdio
+```
+
+The `chatdio` library provides utilities for microphone capture with echo cancellation.
+
+## Step 2: Create a Session Token (Server)
+
+On your server, create a session token with audio passthrough enabled:
+
+```typescript
+// server.ts
+const response = await fetch('https://api.anam.ai/v1/auth/session-token', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
+  },
+  body: JSON.stringify({
+    persona_id: 'your-persona-id',
+    enableAudioPassthrough: true, // Required for ElevenLabs integration
+  }),
+});
+
+const { session_token } = await response.json();
+```
+
+<Tip>
+The `enableAudioPassthrough: true` flag is required. Without it, the avatar won't accept external audio input.
+</Tip>
+
+## Step 3: Initialize the Anam Client
+
+Create the Anam client with input audio disabled (ElevenLabs handles the microphone):
+
+```typescript
+import { createClient } from '@anam-ai/js-sdk';
+
+const anamClient = createClient(sessionToken, {
+  disableInputAudio: true, // ElevenLabs handles microphone input
+});
+
+// Connect to the avatar stream
+const videoElement = document.getElementById('avatar-video') as HTMLVideoElement;
+await anamClient.streamToVideoElement(videoElement);
+```
+
+## Step 4: Set Up Audio Passthrough
+
+Initialize the audio input stream with the correct format for ElevenLabs:
+
+```typescript
+// Configure audio format to match ElevenLabs output
+anamClient.createAgentAudioInputStream({
+  encoding: 'pcm_16bit',
+  sampleRate: 16000,
+  channels: 1, // Mono
+});
+```
+
+<Warning>
+Mismatched audio formats will cause lip-sync issues. ElevenLabs outputs PCM 16-bit at 16kHz mono.
+</Warning>
+
+## Step 5: Connect to ElevenLabs
+
+Establish a WebSocket connection to the ElevenLabs Conversational AI:
+
+```typescript
+const agentId = 'your-elevenlabs-agent-id';
+const ws = new WebSocket(
+  `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${agentId}`
+);
+
+ws.onopen = () => {
+  console.log('Connected to ElevenLabs agent');
+};
+
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  handleElevenLabsMessage(message);
+};
+```
+
+## Step 6: Handle ElevenLabs Messages
+
+Process incoming messages from ElevenLabs and forward audio to Anam:
+
+```typescript
+function handleElevenLabsMessage(message: any) {
+  switch (message.type) {
+    case 'audio':
+      // Forward audio to Anam for lip-sync
+      // Audio is base64-encoded PCM
+      anamClient.sendAudioChunk(message.audio);
+      break;
+
+    case 'agent_response':
+      // Agent finished speaking
+      anamClient.endSequence();
+      break;
+
+    case 'interruption':
+      // User interrupted the agent
+      anamClient.endSequence();
+      break;
+
+    case 'user_transcript':
+      // Speech recognition result
+      console.log('User said:', message.transcript);
+      break;
+
+    case 'ping':
+      // Respond to heartbeat
+      ws.send(JSON.stringify({ type: 'pong' }));
+      break;
+  }
+}
+```
+
+<Info>
+Audio chunks can be sent faster than realtime. Anam's internal buffering handles the pacing automatically.
+</Info>
+
+## Step 7: Capture Microphone Input
+
+Use the `chatdio` library for microphone capture with echo cancellation:
+
+```typescript
+import { MicrophoneCapture } from 'chatdio';
+
+const microphone = new MicrophoneCapture({
+  echoCancellation: true,
+  noiseSuppression: true,
+  sampleRate: 16000,
+});
+
+microphone.on('audio', (audioData: ArrayBuffer) => {
+  // Send audio to ElevenLabs
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'audio',
+      audio: arrayBufferToBase64(audioData),
+    }));
+  }
+});
+
+await microphone.start();
+```
+
+## Complete Example
+
+Here's a complete working example:
+
+```typescript
+import { createClient } from '@anam-ai/js-sdk';
+import { MicrophoneCapture } from 'chatdio';
+
+async function startElevenLabsAgent() {
+  // 1. Get session token from your backend
+  const tokenRes = await fetch('/api/session-token');
+  const { session_token } = await tokenRes.json();
+
+  // 2. Initialize Anam client
+  const anamClient = createClient(session_token, {
+    disableInputAudio: true,
+  });
+
+  // 3. Connect avatar to video element
+  const video = document.getElementById('avatar') as HTMLVideoElement;
+  await anamClient.streamToVideoElement(video);
+
+  // 4. Set up audio passthrough
+  anamClient.createAgentAudioInputStream({
+    encoding: 'pcm_16bit',
+    sampleRate: 16000,
+    channels: 1,
+  });
+
+  // 5. Connect to ElevenLabs
+  const agentId = 'your-elevenlabs-agent-id';
+  const ws = new WebSocket(
+    `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${agentId}`
+  );
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+
+    if (msg.type === 'audio') {
+      anamClient.sendAudioChunk(msg.audio);
+    } else if (msg.type === 'agent_response' || msg.type === 'interruption') {
+      anamClient.endSequence();
+    } else if (msg.type === 'ping') {
+      ws.send(JSON.stringify({ type: 'pong' }));
+    }
+  };
+
+  // 6. Start microphone capture
+  const mic = new MicrophoneCapture({
+    echoCancellation: true,
+    noiseSuppression: true,
+    sampleRate: 16000,
+  });
+
+  mic.on('audio', (data: ArrayBuffer) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'audio',
+        audio: btoa(String.fromCharCode(...new Uint8Array(data))),
+      }));
+    }
+  });
+
+  await mic.start();
+}
+
+startElevenLabsAgent();
+```
+
+## Handling Interruptions
+
+When users interrupt the agent mid-speech, ElevenLabs sends an `interruption` event. Always call `endSequence()` to stop the current lip-sync animation:
+
+```typescript
+if (msg.type === 'interruption') {
+  // Stop current lip-sync immediately
+  anamClient.endSequence();
+  // Avatar is now ready for new audio
+}
+```
+
+## Troubleshooting
+
+**Avatar lips not syncing:**
+- Verify audio format matches: PCM 16-bit, 16kHz, mono
+- Check that `enableAudioPassthrough: true` was set in the session token
+- Ensure `createAgentAudioInputStream()` is called before sending audio
+
+**No audio from ElevenLabs:**
+- Verify your ElevenLabs agent ID is correct
+- Check WebSocket connection state before sending
+- Confirm your ElevenLabs API key has Conversational AI access
+
+**Echo or feedback:**
+- Enable `echoCancellation: true` in MicrophoneCapture
+- Ensure `noiseSuppression: true` is set
+
+## Resources
+
+- [Full demo repository](https://github.com/anam-org/11labs_agent_demo) - Complete working example
+- [ElevenLabs Conversational AI docs](https://elevenlabs.io/docs/conversational-ai) - Agent configuration
+- [Anam audio passthrough API](/audio-passthrough) - Detailed API reference
+
+## Next Steps
+
+- [Getting Started with LiveKit](/getting-started-with-livekit) - Another agent integration option
+- [Bring Your Own LLM](/byo-llm-integration) - Direct LLM integration without a platform

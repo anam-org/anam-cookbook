@@ -1,0 +1,139 @@
+---
+title: Getting Started with Anam
+description: Create your first AI avatar conversation in under 5 minutes using the JavaScript SDK.
+tags: [javascript, turnkey, beginner]
+difficulty: beginner
+sdk: javascript
+date: 2025-01-19
+author: Anam Team
+---
+
+# Getting Started with Anam
+
+This recipe walks you through creating your first AI avatar conversation. By the end, you'll have a working avatar that can see, hear, and respond to users in real-time.
+
+## Prerequisites
+
+- An Anam account ([sign up at lab.anam.ai](https://lab.anam.ai))
+- Your API key from the Anam Lab dashboard
+- Node.js 18+ installed
+
+## Step 1: Install the SDK
+
+Install the Anam JavaScript SDK in your project:
+
+```bash
+npm install @anam-ai/js-sdk
+```
+
+## Step 2: Create a Session Token
+
+Session tokens are short-lived credentials that authenticate your client with Anam's servers. Generate one from your backend:
+
+```typescript
+// server.ts
+const response = await fetch('https://api.anam.ai/v1/auth/session-token', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
+  },
+  body: JSON.stringify({
+    persona_id: 'your-persona-id',
+  }),
+});
+
+const { session_token } = await response.json();
+```
+
+<Tip>
+Never expose your API key in client-side code. Always generate session tokens from your backend.
+</Tip>
+
+## Step 3: Initialize the Client
+
+Create an Anam client instance and connect to start streaming:
+
+```typescript
+// client.ts
+import { AnamClient } from '@anam-ai/js-sdk';
+
+const client = new AnamClient({
+  sessionToken: sessionToken, // from your backend
+});
+
+// Get the video element where the avatar will appear
+const videoElement = document.getElementById('avatar-video') as HTMLVideoElement;
+
+// Start the avatar stream
+await client.streamToVideoElement(videoElement);
+```
+
+## Step 4: Add the Video Element
+
+Add a video element to your HTML where the avatar will render:
+
+```html
+<video
+  id="avatar-video"
+  autoplay
+  playsinline
+  muted
+  style="width: 640px; height: 480px;"
+></video>
+```
+
+<Warning>
+The `muted` attribute is required initially due to browser autoplay policies. You can unmute after user interaction.
+</Warning>
+
+## Step 5: Handle User Input
+
+The SDK automatically captures microphone input when streaming. Users can speak naturally and the avatar will respond.
+
+To programmatically send text input:
+
+```typescript
+// Send a text message to the avatar
+client.sendMessage('Hello, how are you today?');
+```
+
+## Complete Example
+
+Here's a complete working example:
+
+```typescript
+import { AnamClient } from '@anam-ai/js-sdk';
+
+async function startAvatar() {
+  // 1. Get session token from your backend
+  const tokenResponse = await fetch('/api/session-token');
+  const { session_token } = await tokenResponse.json();
+
+  // 2. Create client
+  const client = new AnamClient({
+    sessionToken: session_token,
+  });
+
+  // 3. Start streaming
+  const video = document.getElementById('avatar-video') as HTMLVideoElement;
+  await client.streamToVideoElement(video);
+
+  // 4. Handle events
+  client.on('connectionEstablished', () => {
+    console.log('Connected to avatar!');
+  });
+
+  client.on('messageReceived', (message) => {
+    console.log('Avatar said:', message.text);
+  });
+}
+
+startAvatar();
+```
+
+## Next Steps
+
+- [Configure your persona](/configure-persona) - Customize avatar appearance, voice, and behavior
+- [Add knowledge base](/rag-knowledge-base) - Give your avatar domain-specific knowledge
+- [Handle interruptions](/handling-interruptions) - Let users interrupt the avatar naturally
