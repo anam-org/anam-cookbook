@@ -10,20 +10,20 @@ author: Anam Team
 
 # Custom LLM
 
-This recipe shows how to integrate your own language model with Anam. You maintain full control over the conversation logic while Anam handles the real-time avatar experience.
+This recipe shows how to use your own language model with Anam. Anam handles speech-to-text, text-to-speech, and avatar rendering while you handle the conversation logic.
 
-## How It Works
+## How it works
 
 In BYO LLM mode:
-1. Anam transcribes user speech → sends you the text
-2. You process with your LLM → send back the response
+1. Anam transcribes user speech and sends you the text
+2. You process it with your LLM and send back a response
 3. Anam speaks the response through the avatar
 
-This gives you complete control over:
+You handle:
 - Conversation logic and context
-- RAG/retrieval systems
-- Tool calling and function execution
-- Response filtering and guardrails
+- RAG/retrieval
+- Tool calling
+- Response filtering
 
 ## Prerequisites
 
@@ -44,15 +44,15 @@ const persona = await fetch('https://api.anam.ai/v1/personas', {
   },
   body: JSON.stringify({
     name: 'My BYO LLM Agent',
-    avatar_id: 'eva_frontend_v1',
-    voice_id: 'cartesia-british-female',
-    brain_type: 'CUSTOMER_CLIENT_V1', // This enables BYO LLM mode
+    avatarId: 'your-avatar-id',
+    voiceId: 'your-voice-id',
+    llmId: 'CUSTOMER_CLIENT_V1', // This disables the built-in LLM and enables BYO mode
   }),
 });
 ```
 
 <Info>
-The `brain_type: 'CUSTOMER_CLIENT_V1'` is the key setting that enables BYO LLM mode.
+Setting `llmId: 'CUSTOMER_CLIENT_V1'` disables the built-in LLM so you can provide your own responses.
 </Info>
 
 ## Step 2: Set Up the Message Handler
@@ -60,24 +60,25 @@ The `brain_type: 'CUSTOMER_CLIENT_V1'` is the key setting that enables BYO LLM m
 Configure your client to receive transcriptions and send responses:
 
 ```typescript
-import { AnamClient } from '@anam-ai/js-sdk';
+import { createClient, AnamEvent } from '@anam-ai/js-sdk';
 import OpenAI from 'openai';
 
 const openai = new OpenAI();
 const conversationHistory: Array<{ role: string; content: string }> = [];
 
-const client = new AnamClient({
-  sessionToken: sessionToken,
-});
+const client = createClient(sessionToken);
 
 // Listen for user speech transcriptions
-client.on('userTranscript', async (transcript) => {
-  console.log('User said:', transcript.text);
+client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, async (event) => {
+  // Only process final user messages
+  if (event.role !== 'user' || !event.endOfSpeech) return;
+
+  console.log('User said:', event.content);
 
   // Add to conversation history
   conversationHistory.push({
     role: 'user',
-    content: transcript.text,
+    content: event.content,
   });
 
   // Get response from your LLM
@@ -98,19 +99,21 @@ client.on('userTranscript', async (transcript) => {
   });
 
   // Send to Anam for avatar to speak
-  client.sendMessage(assistantMessage);
+  await client.talk(assistantMessage);
 });
 ```
 
-## Step 3: Handle Streaming Responses
+## Step 3: Stream responses
 
-For better latency, stream your LLM responses:
+Streaming reduces latency because the avatar starts speaking before the full response is ready:
 
 ```typescript
-client.on('userTranscript', async (transcript) => {
-  conversationHistory.push({ role: 'user', content: transcript.text });
+client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, async (event) => {
+  if (event.role !== 'user' || !event.endOfSpeech) return;
 
-  const stream = await openai.chat.completions.create({
+  conversationHistory.push({ role: 'user', content: event.content });
+
+  const llmStream = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       { role: 'system', content: 'You are a helpful assistant.' },
@@ -119,28 +122,27 @@ client.on('userTranscript', async (transcript) => {
     stream: true,
   });
 
+  // Create a talk stream to send chunks to the avatar
+  const talkStream = client.createTalkMessageStream();
   let fullResponse = '';
 
-  for await (const chunk of stream) {
+  for await (const chunk of llmStream) {
     const content = chunk.choices[0]?.delta?.content || '';
     fullResponse += content;
 
     // Stream chunks to Anam as they arrive
     if (content) {
-      client.streamMessageChunk(content);
+      await talkStream.streamMessageChunk(content, false);
     }
   }
 
   // Signal end of message
-  client.endMessageStream();
+  await talkStream.endMessage();
 
   conversationHistory.push({ role: 'assistant', content: fullResponse });
 });
 ```
 
-<Tip>
-Streaming responses significantly reduces perceived latency. The avatar starts speaking as soon as the first tokens arrive.
-</Tip>
 
 ## Step 4: Add Tool Calling
 
@@ -164,7 +166,11 @@ const tools = [
   },
 ];
 
-client.on('userTranscript', async (transcript) => {
+client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, async (event) => {
+  if (event.role !== 'user' || !event.endOfSpeech) return;
+
+  conversationHistory.push({ role: 'user', content: event.content });
+
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: conversationHistory,
@@ -195,9 +201,9 @@ client.on('userTranscript', async (transcript) => {
       messages: conversationHistory,
     });
 
-    client.sendMessage(finalResponse.choices[0].message.content);
+    await client.talk(finalResponse.choices[0].message.content);
   } else {
-    client.sendMessage(message.content);
+    await client.talk(message.content);
   }
 });
 ```
@@ -205,23 +211,21 @@ client.on('userTranscript', async (transcript) => {
 ## Complete Example
 
 ```typescript
-import { AnamClient } from '@anam-ai/js-sdk';
+import { createClient, AnamEvent } from '@anam-ai/js-sdk';
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
 
 async function startBYOLLMSession() {
-  const client = new AnamClient({
-    sessionToken: await getSessionToken(),
-  });
+  const client = createClient(await getSessionToken());
 
   const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 
-  client.on('userTranscript', async ({ text, isFinal }) => {
-    // Only process final transcripts
-    if (!isFinal) return;
+  client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, async (event) => {
+    // Only process final user transcripts
+    if (event.role !== 'user' || !event.endOfSpeech) return;
 
-    history.push({ role: 'user', content: text });
+    history.push({ role: 'user', content: event.content });
 
     // Use Claude for responses
     const response = await anthropic.messages.create({
@@ -234,11 +238,10 @@ async function startBYOLLMSession() {
     const assistantMessage = response.content[0].text;
     history.push({ role: 'assistant', content: assistantMessage });
 
-    client.sendMessage(assistantMessage);
+    await client.talk(assistantMessage);
   });
 
-  const video = document.getElementById('avatar') as HTMLVideoElement;
-  await client.streamToVideoElement(video);
+  await client.streamToVideoElement('avatar');
 }
 ```
 

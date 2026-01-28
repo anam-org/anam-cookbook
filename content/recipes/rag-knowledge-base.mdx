@@ -10,24 +10,16 @@ author: Anam Team
 
 # RAG Knowledge Base
 
-This recipe shows how to give your avatar access to domain-specific knowledge using Anam's built-in RAG (Retrieval-Augmented Generation) capabilities.
+RAG (Retrieval-Augmented Generation) lets your avatar answer questions using your documents instead of making things up.
 
-## Overview
+## Method 1: Anam's built-in knowledge tool
 
-With RAG, your avatar can:
-- Answer questions about your products, services, or documentation
-- Stay grounded in factual information
-- Cite sources for its responses
-- Handle questions outside its training data
+Use Anam's managed knowledge base:
 
-## Method 1: Anam's Built-in Knowledge Tool
-
-The simplest approach is using Anam's managed knowledge base.
-
-### Step 1: Create a Knowledge Folder
+### Step 1: Create a knowledge group
 
 ```typescript
-const folder = await fetch('https://api.anam.ai/v1/knowledge', {
+const response = await fetch('https://api.anam.ai/v1/knowledge/groups', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -39,18 +31,18 @@ const folder = await fetch('https://api.anam.ai/v1/knowledge', {
   }),
 });
 
-const { id: folderId } = await folder.json();
+const { id: groupId } = await response.json();
 ```
 
-### Step 2: Upload Documents
+### Step 2: Upload documents
 
-Upload your knowledge documents (PDF, TXT, MD, DOCX):
+Upload your knowledge documents (PDF, TXT, MD, DOCX, CSV up to 50MB):
 
 ```typescript
 const formData = new FormData();
 formData.append('file', documentFile);
 
-await fetch(`https://api.anam.ai/v1/knowledge/${folderId}/documents`, {
+await fetch(`https://api.anam.ai/v1/knowledge/groups/${groupId}/documents`, {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
@@ -59,9 +51,9 @@ await fetch(`https://api.anam.ai/v1/knowledge/${folderId}/documents`, {
 });
 ```
 
-### Step 3: Create a Knowledge Tool
+### Step 3: Create a knowledge tool
 
-Link the knowledge folder to a tool that your persona can use:
+Link the knowledge group to a tool that your persona can use:
 
 ```typescript
 const tool = await fetch('https://api.anam.ai/v1/tools', {
@@ -72,51 +64,51 @@ const tool = await fetch('https://api.anam.ai/v1/tools', {
   },
   body: JSON.stringify({
     name: 'search_docs',
-    type: 'server_rag',
+    type: 'SERVER_RAG',
     description: 'Search product documentation to answer customer questions',
     config: {
-      knowledge_folder_id: folderId,
-      top_k: 5, // Number of chunks to retrieve
+      documentFolderIds: [groupId], // Array of knowledge group IDs to search
     },
   }),
 });
 ```
 
-### Step 4: Attach to Your Persona
+### Step 4: Attach to your persona
 
-Update your persona to use the knowledge tool:
+Attach the tool to your persona in Anam Lab, or include it in your session token:
 
 ```typescript
-await fetch(`https://api.anam.ai/v1/personas/${personaId}`, {
-  method: 'PATCH',
+// Include the tool when creating a session token
+const response = await fetch('https://api.anam.ai/v1/auth/session-token', {
+  method: 'POST',
   headers: {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
   },
   body: JSON.stringify({
-    tool_ids: [toolId],
-    system_prompt: `You are a helpful product support agent.
-When answering questions about our products, always use the search_docs tool to find accurate information.
-If you can't find the answer in the documentation, say so honestly.`,
+    personaConfig: {
+      type: 'stateful',
+      personaId: 'your-persona-id',
+    },
   }),
 });
 ```
 
 <Tip>
-Update your system prompt to instruct the avatar when and how to use the knowledge tool.
+Update your persona's system prompt in Anam Lab to instruct the avatar when and how to use the knowledge tool. For example: "When answering questions about products, always use the search_docs tool to find accurate information."
 </Tip>
 
-## Method 2: BYO RAG with Custom LLM
+## Method 2: BYO RAG with your own LLM
 
-For more control, implement RAG in your own backend:
+If you need more control, implement RAG yourself:
 
 ```typescript
-import { AnamClient } from '@anam-ai/js-sdk';
+import { createClient, AnamEvent } from '@anam-ai/js-sdk';
 import { OpenAI } from 'openai';
-import { PineconeClient } from '@pinecone-database/pinecone';
+import { Pinecone } from '@pinecone-database/pinecone';
 
 const openai = new OpenAI();
-const pinecone = new PineconeClient();
+const pinecone = new Pinecone();
 
 async function searchKnowledge(query: string) {
   // Generate embedding for the query
@@ -133,13 +125,18 @@ async function searchKnowledge(query: string) {
     includeMetadata: true,
   });
 
-  return results.matches.map((m) => m.metadata.text);
+  return results.matches.map((m) => m.metadata?.text as string);
 }
 
-// In your message handler
-client.on('userTranscript', async ({ text }) => {
+// Set up BYO LLM persona and initialize client
+const client = createClient(sessionToken);
+
+// Listen for user transcripts
+client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, async (event) => {
+  if (event.role !== 'user' || !event.endOfSpeech) return;
+
   // Retrieve relevant context
-  const context = await searchKnowledge(text);
+  const context = await searchKnowledge(event.content);
 
   // Generate response with context
   const response = await openai.chat.completions.create({
@@ -153,17 +150,17 @@ ${context.join('\n\n')}
 
 If the context doesn't contain relevant information, say you don't know.`,
       },
-      { role: 'user', content: text },
+      { role: 'user', content: event.content },
     ],
   });
 
-  client.sendMessage(response.choices[0].message.content);
+  await client.talk(response.choices[0].message.content);
 });
 ```
 
-## Best Practices
+## Tips
 
-### Chunk Your Documents Effectively
+### Chunk documents well
 
 ```typescript
 // Good: Semantic chunking with overlap
@@ -174,7 +171,7 @@ const chunks = splitDocument(document, {
 });
 ```
 
-### Include Metadata
+### Include metadata
 
 ```typescript
 // Store useful metadata with each chunk
@@ -189,7 +186,7 @@ const chunkWithMetadata = {
 };
 ```
 
-### Prompt Engineering for RAG
+### System prompt for RAG
 
 ```typescript
 const systemPrompt = `You are a product support specialist.
@@ -204,12 +201,12 @@ TONE: Friendly, professional, concise`;
 ```
 
 <Warning>
-Always instruct your avatar to acknowledge when it doesn't have information rather than hallucinating answers.
+Tell your avatar to say "I don't know" when it can't find relevant information. Otherwise it will make things up.
 </Warning>
 
-## Testing Your RAG Setup
+## Testing
 
-Test with questions that require knowledge retrieval:
+Test with questions that need document retrieval:
 
 ```typescript
 const testQuestions = [
@@ -221,12 +218,12 @@ const testQuestions = [
 
 for (const question of testQuestions) {
   console.log(`Q: ${question}`);
-  client.sendMessage(question);
+  client.sendUserMessage(question);
   // Verify response uses knowledge base appropriately
 }
 ```
 
-## Next Steps
+## Next steps
 
 - [Add webhook tools](/webhook-tools) - Let your avatar call external APIs
 - [Implement caching](/rag-caching) - Cache frequent queries for faster responses

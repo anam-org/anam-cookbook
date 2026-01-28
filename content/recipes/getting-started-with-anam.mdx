@@ -1,139 +1,384 @@
 ---
-title: Getting Started with Anam
-description: Create your first AI avatar conversation in under 5 minutes using the JavaScript SDK.
-tags: [javascript, turnkey, beginner]
+title: Getting started with Anam
+description: Build a conversational AI persona with Next.js and the Anam JavaScript SDK.
+tags: [javascript, nextjs, beginner]
 difficulty: beginner
 sdk: javascript
 date: 2025-01-19
 author: Anam Team
 ---
 
-# Getting Started with Anam
+# Getting started with Anam
 
-This recipe walks you through creating your first AI avatar conversation. By the end, you'll have a working avatar that can see, hear, and respond to users in real-time.
+This recipe walks through building a web application where users can have a voice conversation with an AI persona. We'll use Next.js and the Anam JavaScript SDK.
+
+The complete example code is available at [examples/getting-started-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/getting-started-nextjs).
+
+## What you'll build
+
+A single page Next.js app with a video player that streams an AI persona. Users click to start a session, then speak using their microphone. The persona listens, thinks, and responds with both voice and video.
 
 ## Prerequisites
 
+- Node.js 18+
 - An Anam account ([sign up at lab.anam.ai](https://lab.anam.ai))
 - Your API key from the Anam Lab dashboard
-- Node.js 18+ installed
 
-## Step 1: Install the SDK
+## Project setup
 
-Install the Anam JavaScript SDK in your project:
+First let's setup our base Next.js application. We'll use `create-next-app` to boilerplate a starting point and then install the Anam JavaScript SDK.
 
 ```bash
-npm install @anam-ai/js-sdk
+pnpm create next-app@latest my-anam-app
+cd my-anam-app
+pnpm add @anam-ai/js-sdk
 ```
 
-## Step 2: Create a Session Token
+Create an `.env.local` file to store your Anam API key.
 
-Session tokens are short-lived credentials that authenticate your client with Anam's servers. Generate one from your backend:
-
-```typescript
-// server.ts
-const response = await fetch('https://api.anam.ai/v1/auth/session-token', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
-  },
-  body: JSON.stringify({
-    persona_id: 'your-persona-id',
-  }),
-});
-
-const { session_token } = await response.json();
+```bash
+ANAM_API_KEY=your_api_key_here
 ```
 
 <Tip>
-Never expose your API key in client-side code. Always generate session tokens from your backend.
+Never expose your API key in client-side code. We'll generate session tokens from a server-side API route.
 </Tip>
 
-## Step 3: Initialize the Client
+## Persona configuration
 
-Create an Anam client instance and connect to start streaming:
-
-```typescript
-// client.ts
-import { AnamClient } from '@anam-ai/js-sdk';
-
-const client = new AnamClient({
-  sessionToken: sessionToken, // from your backend
-});
-
-// Get the video element where the avatar will appear
-const videoElement = document.getElementById('avatar-video') as HTMLVideoElement;
-
-// Start the avatar stream
-await client.streamToVideoElement(videoElement);
-```
-
-## Step 4: Add the Video Element
-
-Add a video element to your HTML where the avatar will render:
-
-```html
-<video
-  id="avatar-video"
-  autoplay
-  playsinline
-  muted
-  style="width: 640px; height: 480px;"
-></video>
-```
-
-<Warning>
-The `muted` attribute is required initially due to browser autoplay policies. You can unmute after user interaction.
-</Warning>
-
-## Step 5: Handle User Input
-
-The SDK automatically captures microphone input when streaming. Users can speak naturally and the avatar will respond.
-
-To programmatically send text input:
+First let's setup our persona config that will define the appearance and behaviour of our persona. We'll put this in `src/config/persona.ts` so that we can easily adjust it later.
 
 ```typescript
-// Send a text message to the avatar
-client.sendMessage('Hello, how are you today?');
+// src/config/persona.ts
+
+export const personaConfig = {
+  // Avatar - the visual character
+  avatarId: "edf6fdcb-acab-44b8-b974-ded72665ee26",
+
+  // Voice - how the persona sounds
+  voiceId: "6bfbe25a-979d-40f3-a92b-5394170af54b",
+
+  // LLM - the AI model powering conversations
+  llmId: "0934d97d-0c3a-4f33-91b0-5e136a0ef466",
+
+  // System prompt - defines personality and behavior
+  systemPrompt: `You are a friendly AI assistant. Keep your responses concise and conversational.`,
+};
 ```
 
-## Complete Example
+You can browse available avatars and voices at [lab.anam.ai](https://lab.anam.ai) and swap in different IDs to change how your persona looks and sounds.
 
-Here's a complete working example:
+## Session token API route
+
+In order to initialise the Anam client we will first need a session token. We can generate this using our persona config and API key. This process should always happen server side so that our API key and specific system prompt can be kept secret.
 
 ```typescript
-import { AnamClient } from '@anam-ai/js-sdk';
+// src/app/api/session-token/route.ts
 
-async function startAvatar() {
-  // 1. Get session token from your backend
-  const tokenResponse = await fetch('/api/session-token');
-  const { session_token } = await tokenResponse.json();
+import { NextResponse } from "next/server";
+import { personaConfig } from "@/config/persona";
 
-  // 2. Create client
-  const client = new AnamClient({
-    sessionToken: session_token,
+export async function POST() {
+  const apiKey = process.env.ANAM_API_KEY;
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "ANAM_API_KEY is not configured" },
+      { status: 500 }
+    );
+  }
+
+  try {
+    const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ personaConfig }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("Anam API error:", error);
+      return NextResponse.json(
+        { error: "Failed to get session token" },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    return NextResponse.json({ sessionToken: data.sessionToken });
+  } catch (error) {
+    console.error("Error fetching session token:", error);
+    return NextResponse.json(
+      { error: "Failed to get session token" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+## Building the persona player component
+
+Now for the main component that will handle our video stream and connection lifecycle. We'll build this up piece by piece, creating small composable functions that we'll bring together at the end.
+
+Let's start with the file setup and imports. We'll need React hooks for state management and the Anam SDK exports.
+
+```typescript
+// src/components/PersonaPlayer.tsx
+
+"use client";
+
+import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  createClient,
+  AnamEvent,
+  ConnectionClosedCode,
+} from "@anam-ai/js-sdk";
+import type { AnamClient } from "@anam-ai/js-sdk";
+
+type ConnectionState = "idle" | "connecting" | "connected" | "error";
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+}
+```
+
+### Fetching a session token
+
+Our first helper function fetches a session token from the API route we created earlier. This is a simple wrapper that handles the fetch and error cases.
+
+```typescript
+async function fetchSessionToken(): Promise<string> {
+  const response = await fetch("/api/session-token", { method: "POST" });
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || "Failed to get session token");
+  }
+  const { sessionToken } = await response.json();
+  return sessionToken;
+}
+```
+
+### Setting up event listeners
+
+The SDK emits events for connection status changes and conversation updates. We'll create a function that registers all the listeners we need. This keeps our main component logic clean and makes the event handling easy to understand at a glance.
+
+- `AnamEvent.CONNECTION_ESTABLISHED` fires when we're connected and ready
+- `AnamEvent.MESSAGE_HISTORY_UPDATED` fires whenever there's a new message in the conversation
+- `AnamEvent.CONNECTION_CLOSED` fires when the connection ends, with a reason code indicating why
+
+```typescript
+function setupEventListeners(
+  client: AnamClient,
+  handlers: {
+    onConnected: () => void;
+    onDisconnected: () => void;
+    onError: (message: string) => void;
+    onMessagesUpdated: (messages: Message[]) => void;
+  }
+) {
+  client.addListener(AnamEvent.CONNECTION_ESTABLISHED, handlers.onConnected);
+
+  client.addListener(AnamEvent.MESSAGE_HISTORY_UPDATED, (messages) => {
+    const formattedMessages: Message[] = messages.map((msg) => ({
+      role: msg.role === "user" ? "user" : "assistant",
+      content: msg.content,
+    }));
+    handlers.onMessagesUpdated(formattedMessages);
   });
 
-  // 3. Start streaming
-  const video = document.getElementById('avatar-video') as HTMLVideoElement;
-  await client.streamToVideoElement(video);
-
-  // 4. Handle events
-  client.on('connectionEstablished', () => {
-    console.log('Connected to avatar!');
-  });
-
-  client.on('messageReceived', (message) => {
-    console.log('Avatar said:', message.text);
+  client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
+    if (reason !== ConnectionClosedCode.NORMAL) {
+      handlers.onError(details || `Connection closed: ${reason}`);
+    } else {
+      handlers.onDisconnected();
+    }
   });
 }
-
-startAvatar();
 ```
 
-## Next Steps
+### The component and session management
 
-- [Configure your persona](/configure-persona) - Customize avatar appearance, voice, and behavior
-- [Add knowledge base](/rag-knowledge-base) - Give your avatar domain-specific knowledge
-- [Handle interruptions](/handling-interruptions) - Let users interrupt the avatar naturally
+Now we can put it all together. The component maintains state for the connection status, any errors, and the conversation messages. We use a ref to hold the client instance so we can access it in our stop and cleanup functions.
+
+```typescript
+export function PersonaPlayer() {
+  const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const clientRef = useRef<AnamClient | null>(null);
+
+  const startSession = useCallback(async () => {
+    setConnectionState("connecting");
+    setError(null);
+
+    try {
+      const sessionToken = await fetchSessionToken();
+      const client = createClient(sessionToken);
+      clientRef.current = client;
+
+      setupEventListeners(client, {
+        onConnected: () => setConnectionState("connected"),
+        onDisconnected: () => setConnectionState("idle"),
+        onError: (message) => {
+          setError(message);
+          setConnectionState("error");
+        },
+        onMessagesUpdated: setMessages,
+      });
+
+      await client.streamToVideoElement("avatar-video");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start session");
+      setConnectionState("error");
+    }
+  }, []);
+
+  const stopSession = useCallback(() => {
+    if (clientRef.current) {
+      clientRef.current.stopStreaming();
+      clientRef.current = null;
+    }
+    setConnectionState("idle");
+    setMessages([]);
+  }, []);
+
+  // Clean up if the component unmounts while a session is active
+  useEffect(() => {
+    return () => {
+      if (clientRef.current) {
+        clientRef.current.stopStreaming();
+      }
+    };
+  }, []);
+```
+
+The `startSession` function brings together our helper functions: it fetches a token, creates the client with `createClient()`, sets up the event listeners, and then calls `streamToVideoElement()` to start the stream. That last call handles all the WebRTC connection setup for us. Once it resolves, the persona will greet the user and the microphone will be active.
+
+### Rendering the video player
+
+For the render, we start with a video element for the stream. The video element needs an `id` that matches what we passed to `streamToVideoElement()`. We use a 3:2 aspect ratio to match the 720x480 video stream.
+
+```typescript
+  return (
+    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto">
+      <div className="relative aspect-[3/2] bg-black rounded-lg overflow-hidden">
+        <video
+          id="avatar-video"
+          autoPlay
+          playsInline
+          className="w-full h-full object-cover"
+        />
+      </div>
+    </div>
+  );
+}
+```
+
+Next we add UI controls that respond to the connection state:
+
+- **idle** - show a button to start the conversation
+- **connecting** - show a loading message
+- **error** - display the error with a retry button
+- **connected** - show an end session button
+
+```typescript
+        {connectionState === "idle" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <button
+              onClick={startSession}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              Start conversation
+            </button>
+          </div>
+        )}
+
+        {connectionState === "connecting" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <div className="text-white">Connecting...</div>
+          </div>
+        )}
+
+        {connectionState === "error" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 gap-4">
+            <div className="text-red-400">{error}</div>
+            <button
+              onClick={startSession}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {connectionState === "connected" && (
+          <button
+            onClick={stopSession}
+            className="absolute top-4 right-4 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+          >
+            End session
+          </button>
+        )}
+```
+
+Finally, we add a conversation history panel that displays the messages from our state. This shows both the user's speech (transcribed) and the persona's responses.
+
+```typescript
+      {connectionState === "connected" && (
+        <div className="h-48 overflow-y-auto bg-white rounded-lg border p-4 space-y-3">
+          {messages.length === 0 ? (
+            <p className="text-gray-500 text-sm">
+              Start speaking to have a conversation...
+            </p>
+          ) : (
+            messages.map((msg, i) => (
+              <div
+                key={i}
+                className={`text-sm ${
+                  msg.role === "user" ? "text-blue-700" : "text-gray-800"
+                }`}
+              >
+                <span className="font-medium">
+                  {msg.role === "user" ? "You" : "Persona"}:
+                </span>{" "}
+                {msg.content}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+```
+
+## Adding the component to the page
+
+Finally, we import and render our component on the main page.
+
+```typescript
+// src/app/page.tsx
+
+import { PersonaPlayer } from "@/components/PersonaPlayer";
+
+export default function Home() {
+  return (
+    <main>
+      <h1>Anam Persona Demo</h1>
+      <p>Click to start a conversation. Speak using your microphone.</p>
+      <PersonaPlayer />
+    </main>
+  );
+}
+```
+
+## Running the app
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000), click "Start conversation", and speak to your persona.
+
+Once you've got it running, try editing `src/config/persona.ts` to experiment with different system prompts. You can change the persona's personality, give it a specific role, or adjust how it responds. Swap in different avatar and voice IDs from [Anam Lab](https://lab.anam.ai) to see how they change the experience.
