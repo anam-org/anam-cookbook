@@ -26,7 +26,7 @@ A single page Next.js app with a video player that streams an AI persona. Users 
 
 ## Project setup
 
-First let's setup our base Next.js application. We'll use `create-next-app` to boilerplate a starting point and then install the Anam JavaScript SDK.
+Let's set up our base Next.js application. We'll use `create-next-app` to boilerplate a starting point and then install the Anam JavaScript SDK.
 
 ```bash
 pnpm create next-app@latest my-anam-app
@@ -46,7 +46,7 @@ Never expose your API key in client-side code. We'll generate session tokens fro
 
 ## Persona configuration
 
-First let's setup our persona config that will define the appearance and behaviour of our persona. We'll put this in `src/config/persona.ts` so that we can easily adjust it later.
+First let's set up our persona config that will define the appearance and behaviour of our persona. We'll put this in `src/config/persona.ts` so that we can easily adjust it later.
 
 ```typescript
 // src/config/persona.ts
@@ -164,7 +164,7 @@ async function fetchSessionToken(): Promise<string> {
 
 ### Setting up event listeners
 
-The SDK emits events for connection status changes and conversation updates. We'll create a function that registers all the listeners we need. This keeps our main component logic clean and makes the event handling easy to understand at a glance.
+The SDK emits events for connection status changes and conversation updates. We'll create a function that registers all the listeners we need. This keeps our component logic clean and the event handling readable.
 
 - `AnamEvent.CONNECTION_ESTABLISHED` fires when we're connected and ready
 - `AnamEvent.MESSAGE_HISTORY_UPDATED` fires whenever there's a new message in the conversation
@@ -355,7 +355,7 @@ Finally, we add a conversation history panel that displays the messages from our
 
 ## Adding the component to the page
 
-Finally, we import and render our component on the main page.
+Now we import and render our component on the main page.
 
 ```typescript
 // src/app/page.tsx
