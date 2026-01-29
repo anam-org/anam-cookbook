@@ -1,5 +1,5 @@
 ---
-title: Client-Side Tools
+title: Client-side tools
 description: Let your AI avatar trigger actions in your application like navigation, modals, and UI updates.
 tags: [tools, javascript, turnkey]
 difficulty: intermediate
@@ -8,391 +8,468 @@ date: 2025-01-19
 author: Anam Team
 ---
 
-# Client-Side Tools
+# Client-side tools
 
-Client tools let your avatar trigger actions in your app. When a user asks to navigate somewhere or open a modal, the avatar can do it directly.
+Client tools let your avatar trigger actions in your app. When a user asks to navigate somewhere or perform an action, the avatar can do it directly. This creates a voice-driven user experience where the AI guides users through your application.
 
-## How it works
+The complete example code is available at [examples/client-tools-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/client-tools-nextjs).
 
-1. User makes a request ("Show me the pricing page")
-2. LLM recognizes the intent and calls the tool
-3. SDK emits a `CLIENT_TOOL_EVENT_RECEIVED` event
-4. Your handler executes the action (navigates to /pricing)
-5. Avatar continues the conversation
+## What you'll build
 
-```
-User: "I'd like to see your pricing"
-Avatar: "Of course! Let me take you to our pricing page."
-→ App navigates to /pricing
-```
-
-<Info>
-Tool calling is currently in beta. The API may change as we continue to improve the feature.
-</Info>
+A Next.js application with multiple pages where the avatar can navigate users based on voice commands. When a user says "show me the pricing page", the avatar responds and navigates to `/pricing`.
 
 ## Prerequisites
 
-- Anam account with API key
-- A persona configured with tools
-- JavaScript SDK installed (`@anam-ai/js-sdk`)
+- Node.js 18+
+- An Anam account ([sign up at lab.anam.ai](https://lab.anam.ai))
+- Your API key from the Anam Lab dashboard
 
-## Step 1: Define your tools
+## Project setup
 
-Each client tool needs a schema that tells the LLM when and how to use it:
+Let's scaffold a Next.js app and install the Anam SDK.
+
+```bash
+pnpm create next-app@latest client-tools
+cd client-tools
+pnpm add @anam-ai/js-sdk
+```
+
+Create an `.env.local` file with your API key.
+
+```bash
+ANAM_API_KEY=your_anam_api_key_here
+```
+
+## Defining the tool
+
+Client tools are defined using a JSON schema that tells the LLM when and how to use them. We'll define a `navigate_to_page` tool that accepts a page name.
 
 ```typescript
-const tools = [
-  {
-    type: 'client',
-    name: 'navigate_to_page',
-    description: 'Navigate to a specific page when the user asks to see pricing, features, documentation, or wants to go to a different section of the site.',
-    parameters: {
-      type: 'object',
-      properties: {
-        page: {
-          type: 'string',
-          description: 'The page to navigate to',
-          enum: ['pricing', 'features', 'docs', 'contact', 'home'],
+// src/config/persona.ts
+
+export const personaConfig = {
+  name: "Website Assistant",
+  avatarId: "edf6fdcb-acab-44b8-b974-ded72665ee26",
+  voiceId: "6bfbe25a-979d-40f3-a92b-5394170af54b",
+  systemPrompt: `You are a helpful assistant for our company website.
+You can navigate users to different pages when they ask to see specific content.
+Available pages: home, pricing, features, contact.
+When a user asks to see a page, use the navigate_to_page tool.
+Keep your responses brief and conversational.`,
+  tools: [
+    {
+      type: "client",
+      name: "navigate_to_page",
+      description:
+        "Navigate to a specific page when the user asks to see pricing, features, contact information, or wants to go to a different section of the site.",
+      parameters: {
+        type: "object",
+        properties: {
+          page: {
+            type: "string",
+            description: "The page to navigate to",
+            enum: ["home", "pricing", "features", "contact"],
+          },
         },
+        required: ["page"],
       },
-      required: ['page'],
     },
-  },
-  {
-    type: 'client',
-    name: 'open_modal',
-    description: 'Open a modal dialog when the user wants to sign up, log in, start a trial, or view more details about something.',
-    parameters: {
-      type: 'object',
-      properties: {
-        modalType: {
-          type: 'string',
-          description: 'The type of modal to open',
-          enum: ['signup', 'login', 'trial', 'details'],
-        },
-      },
-      required: ['modalType'],
-    },
-  },
-];
+  ],
+};
 ```
 
-<Tip>
-Use `enum` to constrain parameter values. This prevents the LLM from generating invalid options and makes your handler code simpler.
-</Tip>
+The tool definition has four parts:
 
-## Step 2: Create a session with tools
+- **type** - Must be `"client"` for tools that trigger events in your app
+- **name** - A unique identifier the LLM uses to call the tool
+- **description** - Tells the LLM when to use this tool. Be specific about the triggers.
+- **parameters** - A JSON schema defining what arguments the tool accepts
 
-Include the tools when creating your session token:
+Using `enum` for the page parameter constrains the LLM to only generate valid page names. This prevents unexpected values and simplifies your handler code.
 
-```typescript
-// server.ts
-const response = await fetch('https://api.anam.ai/v1/auth/session-token', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
-  },
-  body: JSON.stringify({
-    personaConfig: {
-      type: 'stateful',
-      personaId: 'your-persona-id',
-    },
-  }),
-});
+## Session token API route
 
-const { sessionToken } = await response.json();
-```
-
-<Info>
-Tools can be attached to your persona in Anam Lab, or you can include them directly in the session token using an ephemeral persona configuration.
-</Info>
-
-## Step 3: Listen for tool events
-
-Set up an event listener to handle tool invocations:
+The API route creates a session token with the persona config, including the inline tools.
 
 ```typescript
-import { createClient, AnamEvent } from '@anam-ai/js-sdk';
+// src/app/api/session-token/route.ts
 
-const client = createClient(sessionToken);
+import { NextResponse } from "next/server";
+import { personaConfig } from "@/config/persona";
 
-// Listen for client tool events
-client.addListener(AnamEvent.CLIENT_TOOL_EVENT_RECEIVED, (event) => {
-  const { eventName, eventData } = event;
+export async function POST() {
+  const apiKey = process.env.ANAM_API_KEY;
 
-  switch (eventName) {
-    case 'navigate_to_page':
-      handleNavigation(eventData.page);
-      break;
-
-    case 'open_modal':
-      handleModal(eventData.modalType);
-      break;
-
-    default:
-      console.warn('Unknown tool event:', eventName);
-  }
-});
-
-await client.streamToVideoElement('avatar-video');
-```
-
-## Step 4: Implement tool handlers
-
-Create handlers for each tool action:
-
-```typescript
-// Valid pages whitelist
-const validPages = ['pricing', 'features', 'docs', 'contact', 'home'];
-
-function handleNavigation(page: string) {
-  // Validate the page parameter
-  if (!validPages.includes(page)) {
-    console.error('Invalid page:', page);
-    return;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "ANAM_API_KEY is not configured" },
+      { status: 500 }
+    );
   }
 
-  // Navigate to the page
-  window.location.href = `/${page}`;
-}
+  try {
+    const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ personaConfig }),
+    });
 
-function handleModal(modalType: string) {
-  switch (modalType) {
-    case 'signup':
-      showSignupModal();
-      break;
-    case 'login':
-      showLoginModal();
-      break;
-    case 'trial':
-      showTrialModal();
-      break;
-    case 'details':
-      showDetailsModal();
-      break;
-    default:
-      console.error('Unknown modal type:', modalType);
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("Anam API error:", error);
+      return NextResponse.json(
+        { error: "Failed to get session token" },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    return NextResponse.json({ sessionToken: data.sessionToken });
+  } catch (error) {
+    console.error("Error fetching session token:", error);
+    return NextResponse.json(
+      { error: "Failed to get session token" },
+      { status: 500 }
+    );
   }
 }
 ```
 
-<Warning>
-Always validate parameters against a whitelist. The LLM might generate unexpected values.
-</Warning>
+The `tools` array in `personaConfig` gets sent to Anam when creating the session. This inline approach means you don't need to pre-create tools in Anam Lab.
 
-## Complete example
+## Building the component
 
-An e-commerce site implementation:
+Now let's build the component that handles tool events. We'll start with the imports and types.
 
 ```typescript
-import { createClient, AnamEvent } from '@anam-ai/js-sdk';
+// src/components/ClientToolsPlayer.tsx
 
-// Define tools for an e-commerce assistant
-const ecommerceTools = [
-  {
-    type: 'client',
-    name: 'navigate_to_page',
-    description: 'Navigate when user wants to browse products, view cart, see orders, or go to checkout.',
-    parameters: {
-      type: 'object',
-      properties: {
-        page: {
-          type: 'string',
-          enum: ['products', 'cart', 'orders', 'checkout', 'account'],
-        },
-      },
-      required: ['page'],
-    },
-  },
-  {
-    type: 'client',
-    name: 'filter_products',
-    description: 'Apply filters when user wants to see specific product categories or price ranges.',
-    parameters: {
-      type: 'object',
-      properties: {
-        category: {
-          type: 'string',
-          enum: ['electronics', 'clothing', 'home', 'sports'],
-        },
-        maxPrice: {
-          type: 'number',
-          description: 'Maximum price filter',
-        },
-      },
-      required: ['category'],
-    },
-  },
-  {
-    type: 'client',
-    name: 'add_to_cart',
-    description: 'Add a product to cart when user explicitly says they want to buy or add something.',
-    parameters: {
-      type: 'object',
-      properties: {
-        productId: {
-          type: 'string',
-          description: 'The ID of the product to add',
-        },
-        quantity: {
-          type: 'number',
-          description: 'Number of items to add',
-        },
-      },
-      required: ['productId'],
-    },
-  },
-];
+"use client";
 
-async function initializeAssistant() {
-  // Get session token (tools are attached to persona in Anam Lab)
-  const res = await fetch('/api/session-token');
-  const { sessionToken } = await res.json();
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import {
+  createClient,
+  AnamEvent,
+  ConnectionClosedCode,
+} from "@anam-ai/js-sdk";
+import type { AnamClient, ClientToolEvent } from "@anam-ai/js-sdk";
 
-  // Initialize client
-  const client = createClient(sessionToken);
+type ConnectionState = "idle" | "connecting" | "connected" | "error";
 
-  // Handle tool events
-  client.addListener(AnamEvent.CLIENT_TOOL_EVENT_RECEIVED, (event) => {
-    const { eventName, eventData } = event;
+const VALID_PAGES = ["home", "pricing", "features", "contact"] as const;
+type ValidPage = (typeof VALID_PAGES)[number];
 
-    try {
-      switch (eventName) {
-        case 'navigate_to_page':
-          window.location.href = `/${eventData.page}`;
-          break;
+function isValidPage(page: string): page is ValidPage {
+  return VALID_PAGES.includes(page as ValidPage);
+}
+```
 
-        case 'filter_products':
-          applyFilters({
-            category: eventData.category,
-            maxPrice: eventData.maxPrice,
-          });
-          break;
+We import `ClientToolEvent` from the SDK. This type has `eventName` (the tool name) and `eventData` (the parameters the LLM generated). The `VALID_PAGES` array matches our tool's enum and serves as a whitelist for validation.
 
-        case 'add_to_cart':
-          addToCart(eventData.productId, eventData.quantity || 1);
-          break;
-      }
-    } catch (error) {
-      console.error('Tool execution failed:', error);
+### Helper functions
+
+We need a function to fetch session tokens and one to set up event listeners.
+
+```typescript
+async function fetchSessionToken(): Promise<string> {
+  const response = await fetch("/api/session-token", { method: "POST" });
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || "Failed to get session token");
+  }
+  const { sessionToken } = await response.json();
+  return sessionToken;
+}
+
+function setupEventListeners(
+  client: AnamClient,
+  handlers: {
+    onConnected: () => void;
+    onDisconnected: () => void;
+    onError: (message: string) => void;
+    onToolEvent: (event: ClientToolEvent) => void;
+  }
+) {
+  client.addListener(AnamEvent.CONNECTION_ESTABLISHED, handlers.onConnected);
+
+  client.addListener(AnamEvent.CLIENT_TOOL_EVENT_RECEIVED, handlers.onToolEvent);
+
+  client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
+    if (reason !== ConnectionClosedCode.NORMAL) {
+      handlers.onError(details || `Connection closed: ${reason}`);
+    } else {
+      handlers.onDisconnected();
     }
   });
-
-  // Start streaming
-  await client.streamToVideoElement('avatar-video');
 }
-
-initializeAssistant();
 ```
+
+The `CLIENT_TOOL_EVENT_RECEIVED` event fires whenever the LLM calls a client tool. The event includes the tool name and the arguments it generated.
+
+### Handling tool events
+
+The tool event handler validates the page parameter and navigates using Next.js router.
+
+```typescript
+const handleToolEvent = useCallback(
+  (event: ClientToolEvent) => {
+    const { eventName, eventData } = event;
+
+    if (eventName === "navigate_to_page") {
+      const page = eventData.page as string;
+
+      // Validate against whitelist
+      if (!isValidPage(page)) {
+        console.error("Invalid page:", page);
+        return;
+      }
+
+      setLastToolCall(`Navigating to ${page}...`);
+
+      // Navigate after a brief delay so the user sees the feedback
+      setTimeout(() => {
+        const path = page === "home" ? "/" : `/${page}`;
+        router.push(path);
+      }, 500);
+    }
+  },
+  [router]
+);
+```
+
+Always validate tool parameters against a whitelist. Even with `enum` constraints, it's good practice to verify values on the client side before acting on them.
+
+### Component state and session management
+
+```typescript
+export function ClientToolsPlayer() {
+  const router = useRouter();
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [lastToolCall, setLastToolCall] = useState<string | null>(null);
+  const clientRef = useRef<AnamClient | null>(null);
+
+  // ... handleToolEvent defined above ...
+
+  const startSession = useCallback(async () => {
+    setConnectionState("connecting");
+    setError(null);
+    setLastToolCall(null);
+
+    try {
+      const sessionToken = await fetchSessionToken();
+      const client = createClient(sessionToken);
+      clientRef.current = client;
+
+      setupEventListeners(client, {
+        onConnected: () => setConnectionState("connected"),
+        onDisconnected: () => setConnectionState("idle"),
+        onError: (message) => {
+          setError(message);
+          setConnectionState("error");
+        },
+        onToolEvent: handleToolEvent,
+      });
+
+      await client.streamToVideoElement("avatar-video");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start session");
+      setConnectionState("error");
+    }
+  }, [handleToolEvent]);
+
+  const stopSession = useCallback(() => {
+    if (clientRef.current) {
+      clientRef.current.stopStreaming();
+      clientRef.current = null;
+    }
+    setConnectionState("idle");
+    setLastToolCall(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (clientRef.current) {
+        clientRef.current.stopStreaming();
+      }
+    };
+  }, []);
+```
+
+We track `lastToolCall` to show feedback when the avatar triggers navigation. This gives users visual confirmation that their voice command was understood.
+
+### Rendering
+
+```typescript
+  return (
+    <div className="flex flex-col gap-4 w-full max-w-md">
+      <div className="relative aspect-[3/2] bg-black rounded-lg overflow-hidden">
+        <video
+          id="avatar-video"
+          autoPlay
+          playsInline
+          className="w-full h-full object-cover"
+        />
+
+        {connectionState === "idle" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <button
+              onClick={startSession}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              Start conversation
+            </button>
+          </div>
+        )}
+
+        {connectionState === "connecting" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <div className="text-white">Connecting...</div>
+          </div>
+        )}
+
+        {connectionState === "error" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 gap-4">
+            <div className="text-red-400">{error}</div>
+            <button
+              onClick={startSession}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {connectionState === "connected" && (
+          <button
+            onClick={stopSession}
+            className="absolute top-4 right-4 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+          >
+            End session
+          </button>
+        )}
+      </div>
+
+      {lastToolCall && (
+        <div className="px-4 py-2 bg-green-100 text-green-800 rounded-lg text-sm">
+          {lastToolCall}
+        </div>
+      )}
+
+      {connectionState === "connected" && (
+        <p className="text-gray-600 text-sm text-center">
+          Try saying &quot;Show me the pricing page&quot; or &quot;Take me to
+          features&quot;
+        </p>
+      )}
+    </div>
+  );
+}
+```
+
+## Creating the pages
+
+Create pages for the avatar to navigate to. Each page includes the avatar component so users can continue the conversation after navigating.
+
+```typescript
+// src/app/page.tsx
+
+import Link from "next/link";
+import { ClientToolsPlayer } from "@/components/ClientToolsPlayer";
+
+export default function Home() {
+  return (
+    <main className="p-8">
+      <div className="max-w-4xl mx-auto">
+        <nav className="flex gap-4 mb-8 text-sm">
+          <Link href="/" className="text-blue-600 font-medium">
+            Home
+          </Link>
+          <Link href="/pricing" className="text-gray-600 hover:text-gray-900">
+            Pricing
+          </Link>
+          <Link href="/features" className="text-gray-600 hover:text-gray-900">
+            Features
+          </Link>
+          <Link href="/contact" className="text-gray-600 hover:text-gray-900">
+            Contact
+          </Link>
+        </nav>
+
+        <div className="flex flex-col lg:flex-row gap-8 items-start">
+          <div className="flex-1 space-y-4">
+            <h1 className="text-3xl font-bold text-gray-900">
+              Welcome to Our Site
+            </h1>
+            <p className="text-gray-600">
+              This demo shows how Anam avatars can control your application
+              using client-side tools. The avatar can navigate between pages
+              based on voice commands.
+            </p>
+          </div>
+
+          <ClientToolsPlayer />
+        </div>
+      </div>
+    </main>
+  );
+}
+```
+
+Create similar pages for `/pricing`, `/features`, and `/contact`. The example repository has all four pages.
+
+## Running the app
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000), start a conversation, and try saying "Show me the pricing page" or "Take me to features". The avatar will respond and navigate you to the requested page.
 
 ## Writing good tool descriptions
 
-The description tells the LLM when to use each tool. Be specific:
+The description tells the LLM when to use the tool. Be specific about the triggers:
 
 ```typescript
-// Bad - too vague
-description: 'Navigate to a page'
+// Too vague - LLM won't know when to use it
+description: "Navigate to a page"
 
-// Good - specific triggers
-description: 'Navigate to a page when the user explicitly asks to see pricing, wants to view features, needs documentation, or asks to go somewhere specific on the site.'
+// Specific triggers - LLM understands when to call it
+description: "Navigate to a specific page when the user asks to see pricing, features, contact information, or wants to go to a different section of the site."
 ```
+
+## Security considerations
+
+**Validate all parameters** against a whitelist, even when using `enum` constraints:
 
 ```typescript
-// Bad - unclear intent
-description: 'Open a modal'
+const VALID_PAGES = ["home", "pricing", "features", "contact"] as const;
 
-// Good - clear triggers
-description: 'Open the checkout modal only when the user explicitly says they want to purchase, buy, complete their order, or proceed to checkout.'
+if (!VALID_PAGES.includes(page)) {
+  console.error("Invalid page:", page);
+  return;
+}
 ```
 
-## Security
-
-### Validate all parameters
-
-```typescript
-client.addListener(AnamEvent.CLIENT_TOOL_EVENT_RECEIVED, (event) => {
-  const { eventName, eventData } = event;
-
-  // Whitelist of allowed values
-  const allowedPages = ['home', 'pricing', 'docs'];
-
-  if (eventName === 'navigate_to_page') {
-    if (!allowedPages.includes(eventData.page)) {
-      console.error('Invalid navigation target');
-      return;
-    }
-    // Safe to navigate
-  }
-});
-```
-
-### Don't pass sensitive data
+**Don't expose sensitive data** in tool parameters. Use IDs and fetch sensitive data server-side:
 
 ```typescript
 // Bad - exposes sensitive data
-{
-  name: 'process_payment',
-  parameters: {
-    properties: {
-      cardNumber: { type: 'string' }, // Never do this!
-    },
-  },
-}
-
-// Good - use IDs, fetch sensitive data server-side
-{
-  name: 'process_payment',
-  parameters: {
-    properties: {
-      paymentMethodId: { type: 'string' }, // Reference only
-    },
-  },
-}
-```
-
-### Rate limiting
-
-```typescript
-let toolCallCount = 0;
-const MAX_CALLS_PER_MINUTE = 20;
-
-client.addListener(AnamEvent.CLIENT_TOOL_EVENT_RECEIVED, (event) => {
-  toolCallCount++;
-
-  if (toolCallCount > MAX_CALLS_PER_MINUTE) {
-    console.warn('Rate limit exceeded');
-    return;
+parameters: {
+  properties: {
+    cardNumber: { type: "string" }  // Never do this
   }
+}
 
-  // Handle tool event...
-});
-
-// Reset counter every minute
-setInterval(() => {
-  toolCallCount = 0;
-}, 60000);
+// Good - use references
+parameters: {
+  properties: {
+    paymentMethodId: { type: "string" }  // Fetch details server-side
+  }
+}
 ```
-
-## Troubleshooting
-
-**Tool not being called:**
-- Check that the tool description clearly explains when to use it
-- Verify tools are included in the session token
-- Test with explicit phrases like "navigate to pricing"
-
-**Wrong tool parameters:**
-- Use `enum` to constrain values
-- Make parameter descriptions more specific
-- Add examples to your system prompt
-
-**Events not firing:**
-- Ensure event listener is added before `streamToVideoElement`
-- Check browser console for errors
-- Verify WebSocket connection is established
-
-## Next steps
-
-- [RAG Knowledge Base](/rag-knowledge-base) - Add knowledge tools for document search
-- [Custom LLM (client-side)](/custom-llm-client-side) - Implement tools with your own LLM
-- [Anam Lab Tools](https://lab.anam.ai) - Create and manage tools in the dashboard

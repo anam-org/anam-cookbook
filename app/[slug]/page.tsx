@@ -84,7 +84,7 @@ export default async function RecipePage({ params }: RecipePageProps) {
       </header>
 
       {/* Content */}
-      <div className="prose prose-slate dark:prose-invert max-w-none prose-headings:font-semibold prose-headings:text-slate-900 dark:prose-headings:text-neutral-50 prose-p:text-slate-600 dark:prose-p:text-neutral-400 prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline prose-strong:text-slate-900 dark:prose-strong:text-neutral-200 prose-code:text-slate-800 dark:prose-code:text-neutral-200 prose-pre:p-0 prose-pre:bg-transparent prose-li:text-slate-600 dark:prose-li:text-neutral-400 [&>h1:first-child]:hidden">
+      <div className="prose prose-slate dark:prose-invert max-w-none [&>h1:first-child]:hidden">
         <MDXRemote source={content} components={mdxComponents} />
       </div>
     </article>

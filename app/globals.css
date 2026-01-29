@@ -24,32 +24,21 @@ body {
   @apply bg-slate-50 dark:bg-neutral-900 text-slate-900 dark:text-neutral-50 antialiased transition-colors duration-200;
 }
 
-/* Code block styling */
+/* Code blocks - let Shiki handle background via inline styles */
 pre {
-  @apply rounded-lg overflow-x-auto bg-slate-900 dark:bg-neutral-950 text-slate-100 border border-slate-800 dark:border-neutral-800;
+  @apply rounded-lg overflow-x-auto p-4;
 }
 
-pre > code {
-  @apply block p-4 text-sm leading-relaxed;
-}
-
-/* Inline code */
-:not(pre) > code {
-  @apply bg-slate-100 dark:bg-neutral-800 text-slate-800 dark:text-neutral-200 px-1.5 py-0.5 rounded text-sm font-mono;
-}
-
-/* Override shiki themes */
-pre.shiki,
-pre.shiki span {
-  background-color: #0f172a !important;
-}
-
-.dark pre.shiki,
-.dark pre.shiki span {
-  background-color: #0a0a0a !important;
+pre code {
+  @apply block text-sm leading-relaxed;
 }
 
 /* Scrollbar styling for dark mode */
+.dark {
+  scrollbar-color: rgb(82 82 82) rgb(38 38 38);
+  scrollbar-width: thin;
+}
+
 .dark ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

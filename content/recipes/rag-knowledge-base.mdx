@@ -1,5 +1,5 @@
 ---
-title: RAG Knowledge Base
+title: RAG knowledge base
 description: Give your avatar domain-specific knowledge using retrieval-augmented generation.
 tags: [rag, turnkey, tools, intermediate]
 difficulty: intermediate
@@ -8,223 +8,322 @@ date: 2025-01-17
 author: Anam Team
 ---
 
-# RAG Knowledge Base
+# RAG knowledge base
 
-RAG (Retrieval-Augmented Generation) lets your avatar answer questions using your documents instead of making things up.
+When users ask your avatar questions, the underlying LLM generates answers from its training data. But what if users ask about your specific product, your company policies, or documentation that the LLM has never seen?
 
-## Method 1: Anam's built-in knowledge tool
+This is where RAG comes in. RAG (Retrieval-Augmented Generation) lets your avatar search your documents and use that information to answer questions accurately.
 
-Use Anam's managed knowledge base:
+## What is RAG?
 
-### Step 1: Create a knowledge group
+RAG works in two steps:
+
+1. **Retrieval** - When a user asks a question, the system searches your documents to find relevant passages
+2. **Generation** - The LLM uses those passages as context when generating its response
+
+Without RAG, if you asked "What's the return policy?", the LLM would either make something up or say it doesn't know. With RAG, it searches your policy documents, finds the relevant section, and gives an accurate answer.
+
+The "augmented" part is important. The LLM still generates natural, conversational responses. It just has access to your documents as a reference.
+
+## How Anam's knowledge tools work
+
+Anam handles the RAG pipeline for you. Here's what happens when a user asks a question:
+
+1. You upload documents to a knowledge folder
+2. Anam processes and indexes them for semantic search
+3. You create a knowledge tool that points to that folder
+4. You attach the tool to your persona
+5. When the LLM decides it needs information, it calls the tool
+6. Anam searches your documents and returns relevant chunks
+7. The LLM uses those chunks to generate an accurate response
+
+The LLM decides when to use the tool based on your tool description. If a user asks a casual question like "how are you?", it won't search. If they ask "what are the product dimensions?", it will.
+
+## Setting up a knowledge base
+
+### Creating a knowledge folder
+
+Knowledge folders organize your documents. You might have one folder for product docs, another for FAQs, and another for policies.
 
 ```typescript
-const response = await fetch('https://api.anam.ai/v1/knowledge/groups', {
-  method: 'POST',
+const response = await fetch("https://api.anam.ai/v1/knowledge/groups", {
+  method: "POST",
   headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.ANAM_API_KEY}`,
   },
   body: JSON.stringify({
-    name: 'Product Documentation',
-    description: 'Company product docs and FAQs',
+    name: "Product Documentation",
+    description: "Technical guides and product specifications",
   }),
 });
 
-const { id: groupId } = await response.json();
+const { id: folderId } = await response.json();
 ```
 
-### Step 2: Upload documents
+The description helps you remember what's in the folder. It doesn't affect search results.
 
-Upload your knowledge documents (PDF, TXT, MD, DOCX, CSV up to 50MB):
+### Uploading documents
 
-```typescript
-const formData = new FormData();
-formData.append('file', documentFile);
+Anam supports PDF, TXT, MD, DOCX, CSV, JSON, and LOG files up to 50MB. The upload process has three steps for security and reliability.
 
-await fetch(`https://api.anam.ai/v1/knowledge/groups/${groupId}/documents`, {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
-  },
-  body: formData,
-});
-```
-
-### Step 3: Create a knowledge tool
-
-Link the knowledge group to a tool that your persona can use:
+First, request a signed upload URL:
 
 ```typescript
-const tool = await fetch('https://api.anam.ai/v1/tools', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
-  },
-  body: JSON.stringify({
-    name: 'search_docs',
-    type: 'SERVER_RAG',
-    description: 'Search product documentation to answer customer questions',
-    config: {
-      documentFolderIds: [groupId], // Array of knowledge group IDs to search
+const uploadResponse = await fetch(
+  `https://api.anam.ai/v1/knowledge/groups/${folderId}/documents/presigned-upload`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.ANAM_API_KEY}`,
     },
-  }),
+    body: JSON.stringify({
+      filename: "product-manual.pdf",
+      contentType: "application/pdf",
+      fileSize: file.size,
+    }),
+  }
+);
+
+const { uploadUrl, documentId } = await uploadResponse.json();
+```
+
+Then upload the file directly to the signed URL:
+
+```typescript
+await fetch(uploadUrl, {
+  method: "PUT",
+  headers: { "Content-Type": file.type },
+  body: file,
 });
 ```
 
-### Step 4: Attach to your persona
-
-Attach the tool to your persona in Anam Lab, or include it in your session token:
+Finally, confirm the upload so Anam can start processing:
 
 ```typescript
-// Include the tool when creating a session token
-const response = await fetch('https://api.anam.ai/v1/auth/session-token', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
-  },
-  body: JSON.stringify({
-    personaConfig: {
-      type: 'stateful',
-      personaId: 'your-persona-id',
+await fetch(
+  `https://api.anam.ai/v1/knowledge/documents/${documentId}/confirm-upload`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.ANAM_API_KEY}`,
     },
-  }),
-});
+    body: JSON.stringify({ fileSize: file.size }),
+  }
+);
 ```
 
-<Tip>
-Update your persona's system prompt in Anam Lab to instruct the avatar when and how to use the knowledge tool. For example: "When answering questions about products, always use the search_docs tool to find accurate information."
-</Tip>
+Processing takes about 30 seconds. The document status changes from `PROCESSING` to `READY` when it's searchable.
 
-## Method 2: Custom RAG with your own LLM
+### How documents get processed
 
-If you need more control, implement RAG yourself:
+Anam automatically chunks your documents for search. Different file types are handled differently:
 
-```typescript
-import { createClient, AnamEvent } from '@anam-ai/js-sdk';
-import { OpenAI } from 'openai';
-import { Pinecone } from '@pinecone-database/pinecone';
+- **PDF, TXT, MD, DOCX** - Split into paragraphs. Each paragraph becomes a searchable chunk.
+- **CSV** - Each row becomes a chunk. Good for product catalogs or FAQs in spreadsheet format.
+- **JSON** - Kept intact. Useful for structured data.
+- **LOG** - Each line becomes a chunk.
 
-const openai = new OpenAI();
-const pinecone = new Pinecone();
+You don't need to pre-process your documents. But the structure of your documents affects search quality. More on that later.
 
-async function searchKnowledge(query: string) {
-  // Generate embedding for the query
-  const embedding = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
-    input: query,
-  });
+## Creating a knowledge tool
 
-  // Search vector database
-  const index = pinecone.Index('product-docs');
-  const results = await index.query({
-    vector: embedding.data[0].embedding,
-    topK: 5,
-    includeMetadata: true,
-  });
-
-  return results.matches.map((m) => m.metadata?.text as string);
-}
-
-// Set up custom LLM persona and initialize client
-const client = createClient(sessionToken);
-
-// Listen for user transcripts
-client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, async (event) => {
-  if (event.role !== 'user' || !event.endOfSpeech) return;
-
-  // Retrieve relevant context
-  const context = await searchKnowledge(event.content);
-
-  // Generate response with context
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: `You are a helpful assistant. Use the following context to answer questions:
-
-${context.join('\n\n')}
-
-If the context doesn't contain relevant information, say you don't know.`,
-      },
-      { role: 'user', content: event.content },
-    ],
-  });
-
-  await client.talk(response.choices[0].message.content);
-});
-```
-
-## Tips
-
-### Chunk documents well
+A knowledge tool tells the LLM how and when to search your documents. You define it like any other tool, but with `type: "server"` and `subtype: "knowledge"`.
 
 ```typescript
-// Good: Semantic chunking with overlap
-const chunks = splitDocument(document, {
-  chunkSize: 500,    // ~500 tokens per chunk
-  overlap: 50,       // Overlap for context continuity
-  splitOn: 'paragraph', // Respect semantic boundaries
-});
-```
-
-### Include metadata
-
-```typescript
-// Store useful metadata with each chunk
-const chunkWithMetadata = {
-  text: chunk,
-  metadata: {
-    source: 'product-manual-v2.pdf',
-    page: 15,
-    section: 'Troubleshooting',
-    lastUpdated: '2025-01-15',
-  },
+const personaConfig = {
+  name: "Support Agent",
+  avatarId: "your-avatar-id",
+  voiceId: "your-voice-id",
+  systemPrompt: `You are a helpful product support agent.
+When users ask questions about our products, use the search_docs tool to find accurate information.
+If you can't find relevant information, say so honestly.`,
+  tools: [
+    {
+      type: "server",
+      subtype: "knowledge",
+      name: "search_docs",
+      description:
+        "Search product documentation when users ask questions about features, specifications, installation, troubleshooting, or usage.",
+      documentFolderIds: [folderId],
+    },
+  ],
 };
 ```
 
-### System prompt for RAG
+The `documentFolderIds` array specifies which folders to search. You can include multiple folders if your knowledge is spread across them.
+
+The tool description is important. It tells the LLM when to use the tool. Be specific about the types of questions that should trigger a search.
+
+### Using the tool in a session
+
+Include the persona config when creating a session token:
 
 ```typescript
-const systemPrompt = `You are a product support specialist.
+const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.ANAM_API_KEY}`,
+  },
+  body: JSON.stringify({ personaConfig }),
+});
 
-INSTRUCTIONS:
-1. Always search the knowledge base before answering product questions
-2. If you find relevant information, cite the source
-3. If the knowledge base doesn't have the answer, say "I don't have that information in my documentation, but I can help you contact support"
-4. Never make up product specifications or features
-
-TONE: Friendly, professional, concise`;
+const { sessionToken } = await response.json();
 ```
 
-<Warning>
-Tell your avatar to say "I don't know" when it can't find relevant information. Otherwise it will make things up.
-</Warning>
+The knowledge tool works automatically. You don't need to handle any events in your client code. When the LLM calls the tool, Anam performs the search and returns results to the LLM, which then generates a response.
 
-## Testing
+## Writing good documents for RAG
 
-Test with questions that need document retrieval:
+Search quality depends on how you structure your documents. Here are the principles that matter:
+
+### Make paragraphs self-contained
+
+Each paragraph might be retrieved without its surrounding context. If a paragraph references "the steps above" or "as mentioned earlier", the LLM won't have that context.
+
+```text
+Bad - relies on context:
+Follow the steps above to install. Then configure as follows...
+
+Good - self-contained:
+After installing the application, open Settings > Configuration to set up your preferences.
+```
+
+### Use clear headings
+
+Headings help Anam understand document structure. They also give the LLM context about what section information came from.
+
+```text
+# Product Installation Guide
+
+## System Requirements
+
+The application requires Windows 10 or later, macOS 12 or later, or Ubuntu 20.04 or later.
+Minimum 4GB RAM and 500MB disk space.
+
+## Installation Steps
+
+Download the installer from our website. Run the installer and follow the prompts.
+The default installation location is recommended for most users.
+```
+
+### Keep files focused
+
+A single 200-page PDF covering everything is harder to search than 10 focused documents. Consider splitting large documents by topic:
+
+- `installation-guide.pdf`
+- `troubleshooting-guide.pdf`
+- `api-reference.pdf`
+- `faq.pdf`
+
+### Use descriptive filenames
+
+Filenames are metadata that can help with search relevance:
+
+- `password-reset-guide.pdf` (good)
+- `document-final-v2.pdf` (not helpful)
+
+## System prompts for RAG
+
+The system prompt guides how the LLM uses retrieved information. Here's a pattern that works well:
+
+```typescript
+const systemPrompt = `You are a product support specialist for Acme Corp.
+
+When users ask product questions:
+1. Use the search_docs tool to find accurate information
+2. Answer based on what you find in the documentation
+3. If the documentation doesn't cover the question, say "I don't have that information in our documentation" and offer to connect them with support
+
+Never make up product specifications, prices, or policies. If you're not sure, say so.
+
+Keep responses conversational and concise since they'll be spoken aloud.`;
+```
+
+The key instruction is telling the LLM to admit when it doesn't have information. Without this, LLMs tend to generate plausible-sounding but incorrect answers.
+
+## Testing your knowledge base
+
+Before going live, test with questions that should retrieve from your documents:
 
 ```typescript
 const testQuestions = [
-  'What are the product dimensions?',        // Should retrieve from docs
-  'How do I reset my password?',             // Should retrieve from docs
-  'What is the meaning of life?',            // Should acknowledge no relevant docs
-  'Compare your product to CompetitorX',     // Should use docs if available
-];
+  // Should find specific information
+  "What are the system requirements?",
+  "How do I reset my password?",
+  "What's included in the pro plan?",
 
-for (const question of testQuestions) {
-  console.log(`Q: ${question}`);
-  client.sendUserMessage(question);
-  // Verify response uses knowledge base appropriately
-}
+  // Should acknowledge missing information
+  "What's the weather like today?",
+  "Compare your product to CompetitorX",
+];
 ```
 
-## Next steps
+For each question, verify that:
 
-- [Add webhook tools](/webhook-tools) - Let your avatar call external APIs
-- [Implement caching](/rag-caching) - Cache frequent queries for faster responses
-- [Monitor retrieval quality](/rag-monitoring) - Track and improve retrieval accuracy
+1. The avatar searches when it should
+2. The response matches your documentation
+3. It admits when information isn't available
+
+You can test search directly using the debug modal in Anam Lab (`Ctrl+Shift+K` on the knowledge page) to see what chunks are returned for a query.
+
+## Organizing multiple folders
+
+For larger knowledge bases, organize folders by domain:
+
+```
+Product Documentation/
+  - installation-guide.pdf
+  - feature-overview.pdf
+  - api-reference.pdf
+
+Support FAQs/
+  - billing-faq.pdf
+  - troubleshooting-faq.pdf
+
+Policies/
+  - privacy-policy.pdf
+  - terms-of-service.pdf
+```
+
+You can create focused tools that search specific folders:
+
+```typescript
+tools: [
+  {
+    type: "server",
+    subtype: "knowledge",
+    name: "search_product_docs",
+    description: "Search for technical product information, features, and how-to guides",
+    documentFolderIds: [productDocsFolderId],
+  },
+  {
+    type: "server",
+    subtype: "knowledge",
+    name: "search_policies",
+    description: "Search company policies including privacy policy, terms of service, and refund policy",
+    documentFolderIds: [policiesFolderId],
+  },
+]
+```
+
+This helps the LLM choose the right tool for each question. Technical questions go to product docs, policy questions go to policies.
+
+## Common issues
+
+**Search returns no results**
+- Check that documents are in `READY` status (processing takes ~30 seconds)
+- Verify the folder ID in your tool matches where you uploaded documents
+- Try the debug modal to test queries directly
+
+**LLM doesn't use the tool**
+- Check your tool description. It should clearly describe when to use the tool.
+- Update your system prompt to instruct the LLM to use the tool for relevant questions.
+
+**Responses are inaccurate**
+- The retrieved chunks might not contain the answer. Check what's being retrieved using the debug modal.
+- Your documents might need better structure. See the "Writing good documents" section.
+- Add explicit instructions in your system prompt to only answer from documentation.
