@@ -49,6 +49,6 @@ export const featuredRecipeSlugs: string[] = [
   'getting-started-with-livekit',
   'elevenlabs-conversational-agents',
   'client-side-tools',
-  'byo-llm-integration',
+  'custom-llm-integration',
   'rag-knowledge-base',
 ];

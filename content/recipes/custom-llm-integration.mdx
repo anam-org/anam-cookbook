@@ -14,7 +14,7 @@ This recipe shows how to use your own language model with Anam. Anam handles spe
 
 ## How it works
 
-In BYO LLM mode:
+In custom LLM mode:
 1. Anam transcribes user speech and sends you the text
 2. You process it with your LLM and send back a response
 3. Anam speaks the response through the avatar
@@ -31,9 +31,9 @@ You handle:
 - Your LLM endpoint (OpenAI, Anthropic, self-hosted, etc.)
 - Node.js 18+
 
-## Step 1: Create a BYO LLM Persona
+## Step 1: Create a Custom LLM Persona
 
-First, create a persona configured for BYO LLM mode in Anam Lab, or via the API:
+First, create a persona configured for custom LLM mode in Anam Lab, or via the API:
 
 ```typescript
 const persona = await fetch('https://api.anam.ai/v1/personas', {
@@ -43,10 +43,10 @@ const persona = await fetch('https://api.anam.ai/v1/personas', {
     'Authorization': `Bearer ${process.env.ANAM_API_KEY}`,
   },
   body: JSON.stringify({
-    name: 'My BYO LLM Agent',
+    name: 'My Custom LLM Agent',
     avatarId: 'your-avatar-id',
     voiceId: 'your-voice-id',
-    llmId: 'CUSTOMER_CLIENT_V1', // This disables the built-in LLM and enables BYO mode
+    llmId: 'CUSTOMER_CLIENT_V1', // This disables the built-in LLM and enables custom LLM mode
   }),
 });
 ```
@@ -216,7 +216,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic();
 
-async function startBYOLLMSession() {
+async function startCustomLLMSession() {
   const client = createClient(await getSessionToken());
 
   const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];

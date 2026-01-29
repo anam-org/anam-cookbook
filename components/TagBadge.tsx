@@ -22,10 +22,6 @@ const tagColors: Record<string, { light: string; dark: string }> = {
     light: 'bg-blue-50 text-blue-700 border-blue-200',
     dark: 'dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800',
   },
-  'byo-llm': {
-    light: 'bg-blue-50 text-blue-700 border-blue-200',
-    dark: 'dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800',
-  },
   livekit: {
     light: 'bg-purple-50 text-purple-700 border-purple-200',
     dark: 'dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-800',

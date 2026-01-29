@@ -98,7 +98,7 @@ const response = await fetch('https://api.anam.ai/v1/auth/session-token', {
 Update your persona's system prompt in Anam Lab to instruct the avatar when and how to use the knowledge tool. For example: "When answering questions about products, always use the search_docs tool to find accurate information."
 </Tip>
 
-## Method 2: BYO RAG with your own LLM
+## Method 2: Custom RAG with your own LLM
 
 If you need more control, implement RAG yourself:
 
@@ -128,7 +128,7 @@ async function searchKnowledge(query: string) {
   return results.matches.map((m) => m.metadata?.text as string);
 }
 
-// Set up BYO LLM persona and initialize client
+// Set up custom LLM persona and initialize client
 const client = createClient(sessionToken);
 
 // Listen for user transcripts
