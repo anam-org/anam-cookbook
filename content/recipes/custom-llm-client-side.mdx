@@ -1,0 +1,506 @@
+---
+title: Custom LLM (client-side)
+description: Use your own language model while Anam handles speech-to-text, text-to-speech, and avatar rendering.
+tags: [custom-llm, javascript, intermediate]
+difficulty: intermediate
+sdk: javascript
+date: 2025-01-18
+author: Anam Team
+---
+
+# Custom LLM (client-side)
+
+This recipe shows how to use your own language model with Anam using a client-side integration. Instead of using one of Anam's built-in LLMs, you'll provide responses from your own model while Anam handles everything else: transcribing user speech, synthesizing your responses into audio, and rendering the avatar.
+
+The complete example code is available at [examples/custom-llm-client-side-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/custom-llm-client-side-nextjs).
+
+## What you'll build
+
+A Next.js application where users speak to an avatar powered by your own LLM. When the user speaks, Anam transcribes their speech and sends you the text. You process it with your language model, stream the response back, and Anam speaks it through the avatar.
+
+This approach is useful when you need:
+
+- Your own custom built LLM
+- Custom RAG or retrieval logic
+- Tool calling with your own infrastructure
+- Response filtering or guardrails
+
+In this example, we'll use OpenAI's GPT-4o-mini model to represent our custom LLM. However, in your own implementation, you can use your own LLM or any other provider you prefer.
+
+## Prerequisites
+
+- Node.js 18+
+- An Anam account ([sign up at lab.anam.ai](https://lab.anam.ai))
+- Your API key from the Anam Lab dashboard
+- An OpenAI API key (or credentials for your own custom LLM)
+
+## Project setup
+
+Let's scaffold a Next.js app and install the dependencies we need.
+
+```bash
+pnpm create next-app@latest custom-llm-client-side
+cd custom-llm-client-side
+pnpm add @anam-ai/js-sdk openai
+```
+
+Create an `.env.local` file with your API keys.
+
+```bash
+ANAM_API_KEY=your_anam_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
+```
+
+<Tip>
+Never expose API keys in client-side code. We'll call both Anam and OpenAI from server-side API routes.
+</Tip>
+
+## Persona configuration
+
+The key to custom LLM mode is setting `llmId` to `CUSTOMER_CLIENT_V1`. This tells Anam not to use its built-in language model, so you can provide responses yourself.
+
+```typescript
+// src/config/persona.ts
+
+export const personaConfig = {
+  // Avatar appearance
+  avatarId: "edf6fdcb-acab-44b8-b974-ded72665ee26",
+
+  // Voice
+  voiceId: "6bfbe25a-979d-40f3-a92b-5394170af54b",
+
+  // CUSTOMER_CLIENT_V1 disables the built-in LLM
+  llmId: "CUSTOMER_CLIENT_V1",
+};
+
+// System prompt for your LLM (handled on your side, not sent to Anam)
+export const systemPrompt = `You are a friendly AI assistant. Keep your responses concise and conversational since they will be spoken aloud.`;
+```
+
+Notice that there's no `systemPrompt` in the `personaConfig`. Since you're providing your own LLM, the system prompt stays on your server. Your prompt and any sensitive instructions never leave your infrastructure.
+
+## Session token API route
+
+This route is the same as a standard Anam setup. It exchanges your API key for a short-lived session token.
+
+```typescript
+// src/app/api/session-token/route.ts
+
+import { NextResponse } from "next/server";
+import { personaConfig } from "@/config/persona";
+
+export async function POST() {
+  const apiKey = process.env.ANAM_API_KEY;
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "ANAM_API_KEY is not configured" },
+      { status: 500 }
+    );
+  }
+
+  try {
+    const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ personaConfig }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("Anam API error:", error);
+      return NextResponse.json(
+        { error: "Failed to get session token" },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    return NextResponse.json({ sessionToken: data.sessionToken });
+  } catch (error) {
+    console.error("Error fetching session token:", error);
+    return NextResponse.json(
+      { error: "Failed to get session token" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+## LLM API route
+
+Now we need an API route that our client can call to get LLM responses. This route receives the conversation history and streams back a response from OpenAI.
+
+```typescript
+// src/app/api/chat/route.ts
+
+import { NextRequest } from "next/server";
+import OpenAI from "openai";
+import { systemPrompt } from "@/config/persona";
+
+const openai = new OpenAI();
+
+interface AnamMessage {
+  role: "user" | "persona";
+  content: string;
+}
+
+export async function POST(request: NextRequest) {
+  const { messages } = (await request.json()) as { messages: AnamMessage[] };
+
+  // Map Anam's "persona" role to OpenAI's "assistant" role
+  const openaiMessages = messages.map((m) => ({
+    role: m.role === "persona" ? ("assistant" as const) : ("user" as const),
+    content: m.content,
+  }));
+
+  const stream = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "system", content: systemPrompt }, ...openaiMessages],
+    stream: true,
+  });
+
+  const encoder = new TextEncoder();
+  const readable = new ReadableStream({
+    async start(controller) {
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || "";
+        if (content) {
+          controller.enqueue(encoder.encode(content));
+        }
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(readable, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+```
+
+Anam uses `"persona"` for assistant messages while OpenAI expects `"assistant"`, so we map the roles before sending to the API. The route streams text chunks directly, without JSON wrapping. The client reads these chunks and forwards them to Anam.
+
+## Building the component
+
+Now for the main component. We'll build it up piece by piece, starting with the imports and types.
+
+```typescript
+// src/components/CustomLLMPlayer.tsx
+
+"use client";
+
+import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  createClient,
+  AnamEvent,
+  ConnectionClosedCode,
+} from "@anam-ai/js-sdk";
+import type { AnamClient, Message } from "@anam-ai/js-sdk";
+
+type ConnectionState = "idle" | "connecting" | "connected" | "error";
+```
+
+We import the `Message` type directly from the SDK. This type has `role: "user" | "persona"`, `content`, `id`, and an optional `interrupted` flag.
+
+### Helper functions
+
+We need two helper functions: one to fetch session tokens and one to stream LLM responses.
+
+```typescript
+async function fetchSessionToken(): Promise<string> {
+  const response = await fetch("/api/session-token", { method: "POST" });
+  if (!response.ok) {
+    const data = await response.json();
+    throw new Error(data.error || "Failed to get session token");
+  }
+  const { sessionToken } = await response.json();
+  return sessionToken;
+}
+
+async function streamLLMResponse(
+  messages: Message[]
+): Promise<ReadableStream<Uint8Array>> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error("Failed to get LLM response");
+  }
+
+  return response.body;
+}
+```
+
+### Event listener setup
+
+For custom LLM mode, we listen to `MESSAGE_HISTORY_UPDATED`. This event fires whenever a message is completed, both when the user finishes speaking and when the persona finishes speaking. Anam maintains the conversation history for us, so we don't need to track messages manually.
+
+```typescript
+function setupEventListeners(
+  client: AnamClient,
+  handlers: {
+    onConnected: () => void;
+    onDisconnected: () => void;
+    onError: (message: string) => void;
+    onMessagesUpdated: (messages: Message[]) => void;
+  }
+) {
+  client.addListener(AnamEvent.CONNECTION_ESTABLISHED, handlers.onConnected);
+
+  client.addListener(AnamEvent.MESSAGE_HISTORY_UPDATED, handlers.onMessagesUpdated);
+
+  client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
+    if (reason !== ConnectionClosedCode.NORMAL) {
+      handlers.onError(details || `Connection closed: ${reason}`);
+    } else {
+      handlers.onDisconnected();
+    }
+  });
+}
+```
+
+### Handling message updates
+
+When the message history updates, we check if there's a new user message that we haven't processed yet. If so, we send the full conversation history to our LLM and stream the response back to Anam.
+
+```typescript
+const handleMessagesUpdated = useCallback(async (messages: Message[]) => {
+  setMessages([...messages]);
+
+  // Find the latest user message
+  const latestUserMessage = [...messages].reverse().find((m) => m.role === "user");
+  if (!latestUserMessage) return;
+
+  // Skip if we've already processed this message
+  if (latestUserMessage.id === lastProcessedUserMessageId.current) return;
+  lastProcessedUserMessageId.current = latestUserMessage.id;
+
+  const client = clientRef.current;
+  if (!client) return;
+
+  setIsResponding(true);
+
+  try {
+    // Stream response from our LLM
+    const responseStream = await streamLLMResponse(messages);
+    const reader = responseStream.getReader();
+    const decoder = new TextDecoder();
+
+    // Create a talk stream to send chunks to the avatar
+    const talkStream = client.createTalkMessageStream();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      await talkStream.streamMessageChunk(chunk, false);
+    }
+
+    await talkStream.endMessage();
+  } catch (err) {
+    console.error("Error getting LLM response:", err);
+    setError("Failed to get response from LLM");
+  } finally {
+    setIsResponding(false);
+  }
+}, []);
+```
+
+We track `lastProcessedUserMessageId` to avoid processing the same message twice. The `MESSAGE_HISTORY_UPDATED` event fires for both user and persona messages, so we need to filter to only respond to new user messages.
+
+The `createTalkMessageStream()` method returns a stream object that lets you send text in chunks. As each chunk arrives from your LLM, you call `streamMessageChunk(chunk, false)`. The `false` indicates this isn't the final chunk. When you're done, call `endMessage()` to signal completion.
+
+This streaming approach reduces latency because the avatar starts speaking before the full response is ready. Once the persona finishes speaking, Anam automatically adds the complete response to the message history.
+
+### Component state and session management
+
+Now let's put together the component with state management and session lifecycle.
+
+```typescript
+export function CustomLLMPlayer() {
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isResponding, setIsResponding] = useState(false);
+  const clientRef = useRef<AnamClient | null>(null);
+  const lastProcessedUserMessageId = useRef<string | null>(null);
+
+  // ... handleMessagesUpdated defined above ...
+
+  const startSession = useCallback(async () => {
+    setConnectionState("connecting");
+    setError(null);
+
+    try {
+      const sessionToken = await fetchSessionToken();
+      const client = createClient(sessionToken);
+      clientRef.current = client;
+
+      setupEventListeners(client, {
+        onConnected: () => setConnectionState("connected"),
+        onDisconnected: () => setConnectionState("idle"),
+        onError: (message) => {
+          setError(message);
+          setConnectionState("error");
+        },
+        onMessagesUpdated: handleMessagesUpdated,
+      });
+
+      await client.streamToVideoElement("avatar-video");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start session");
+      setConnectionState("error");
+    }
+  }, [handleMessagesUpdated]);
+
+  const stopSession = useCallback(() => {
+    if (clientRef.current) {
+      clientRef.current.stopStreaming();
+      clientRef.current = null;
+    }
+    setConnectionState("idle");
+    setMessages([]);
+    lastProcessedUserMessageId.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (clientRef.current) {
+        clientRef.current.stopStreaming();
+      }
+    };
+  }, []);
+```
+
+### Rendering
+
+The render is similar to a standard Anam player, with an added indicator when the LLM is generating a response.
+
+```typescript
+  return (
+    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto">
+      <div className="relative aspect-[3/2] bg-black rounded-lg overflow-hidden">
+        <video
+          id="avatar-video"
+          autoPlay
+          playsInline
+          className="w-full h-full object-cover"
+        />
+
+        {connectionState === "idle" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <button
+              onClick={startSession}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              Start conversation
+            </button>
+          </div>
+        )}
+
+        {connectionState === "connecting" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <div className="text-white">Connecting...</div>
+          </div>
+        )}
+
+        {connectionState === "error" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 gap-4">
+            <div className="text-red-400">{error}</div>
+            <button
+              onClick={startSession}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {connectionState === "connected" && (
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            {isResponding && (
+              <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded">
+                Thinking...
+              </span>
+            )}
+            <button
+              onClick={stopSession}
+              className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+            >
+              End session
+            </button>
+          </div>
+        )}
+      </div>
+
+      {connectionState === "connected" && (
+        <div className="h-48 overflow-y-auto bg-white rounded-lg border p-4 space-y-3">
+          {messages.length === 0 ? (
+            <p className="text-gray-500 text-sm">
+              Start speaking to have a conversation...
+            </p>
+          ) : (
+            messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`text-sm ${
+                  msg.role === "user" ? "text-blue-700" : "text-gray-800"
+                }`}
+              >
+                <span className="font-medium">
+                  {msg.role === "user" ? "You" : "Assistant"}:
+                </span>{" "}
+                {msg.content}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## Adding the component to the page
+
+```typescript
+// src/app/page.tsx
+
+import { CustomLLMPlayer } from "@/components/CustomLLMPlayer";
+
+export default function Home() {
+  return (
+    <main className="p-8">
+      <div className="max-w-4xl mx-auto space-y-4">
+        <h1 className="text-2xl font-bold text-gray-900">
+          Custom LLM with Anam
+        </h1>
+        <p className="text-gray-600">
+          This demo uses a custom language model while Anam handles
+          speech-to-text, text-to-speech, and avatar rendering.
+        </p>
+        <CustomLLMPlayer />
+      </div>
+    </main>
+  );
+}
+```
+
+## Running the app
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000), click "Start conversation", and speak. You'll see your words transcribed, sent to your LLM, and the response spoken by the avatar.
+
+The `/api/chat` route uses OpenAI in this example, but you can swap in any LLM provider: Anthropic, Google, or a self-hosted model. Just modify the route to call your preferred API. The client-side code stays the same since it just expects a text stream.

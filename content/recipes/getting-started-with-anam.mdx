@@ -136,14 +136,9 @@ import {
   AnamEvent,
   ConnectionClosedCode,
 } from "@anam-ai/js-sdk";
-import type { AnamClient } from "@anam-ai/js-sdk";
+import type { AnamClient, Message } from "@anam-ai/js-sdk";
 
 type ConnectionState = "idle" | "connecting" | "connected" | "error";
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
 ```
 
 ### Fetching a session token
@@ -182,13 +177,7 @@ function setupEventListeners(
 ) {
   client.addListener(AnamEvent.CONNECTION_ESTABLISHED, handlers.onConnected);
 
-  client.addListener(AnamEvent.MESSAGE_HISTORY_UPDATED, (messages) => {
-    const formattedMessages: Message[] = messages.map((msg) => ({
-      role: msg.role === "user" ? "user" : "assistant",
-      content: msg.content,
-    }));
-    handlers.onMessagesUpdated(formattedMessages);
-  });
+  client.addListener(AnamEvent.MESSAGE_HISTORY_UPDATED, handlers.onMessagesUpdated);
 
   client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
     if (reason !== ConnectionClosedCode.NORMAL) {
@@ -335,9 +324,9 @@ Finally, we add a conversation history panel that displays the messages from our
               Start speaking to have a conversation...
             </p>
           ) : (
-            messages.map((msg, i) => (
+            messages.map((msg) => (
               <div
-                key={i}
+                key={msg.id}
                 className={`text-sm ${
                   msg.role === "user" ? "text-blue-700" : "text-gray-800"
                 }`}

@@ -20,6 +20,20 @@ async function fetchSessionToken(): Promise<string> {
   return sessionToken;
 }
 
+async function streamLLMResponse(messages: Message[]): Promise<ReadableStream<Uint8Array>> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error("Failed to get LLM response");
+  }
+
+  return response.body;
+}
+
 function setupEventListeners(
   client: AnamClient,
   handlers: {
@@ -42,12 +56,56 @@ function setupEventListeners(
   });
 }
 
-export function PersonaPlayer() {
+export function CustomLLMPlayer() {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isResponding, setIsResponding] = useState(false);
   const clientRef = useRef<AnamClient | null>(null);
+  const lastProcessedUserMessageId = useRef<string | null>(null);
+
+  const handleMessagesUpdated = useCallback(async (messages: Message[]) => {
+    setMessages([...messages]);
+
+    // Find the latest user message
+    const latestUserMessage = [...messages].reverse().find((m) => m.role === "user");
+    if (!latestUserMessage) return;
+
+    // Skip if we've already processed this message
+    if (latestUserMessage.id === lastProcessedUserMessageId.current) return;
+    lastProcessedUserMessageId.current = latestUserMessage.id;
+
+    const client = clientRef.current;
+    if (!client) return;
+
+    setIsResponding(true);
+
+    try {
+      // Stream response from our LLM
+      const responseStream = await streamLLMResponse(messages);
+      const reader = responseStream.getReader();
+      const decoder = new TextDecoder();
+
+      // Create a talk stream to send chunks to the avatar
+      const talkStream = client.createTalkMessageStream();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        await talkStream.streamMessageChunk(chunk, false);
+      }
+
+      await talkStream.endMessage();
+    } catch (err) {
+      console.error("Error getting LLM response:", err);
+      setError("Failed to get response from LLM");
+    } finally {
+      setIsResponding(false);
+    }
+  }, []);
 
   const startSession = useCallback(async () => {
     setConnectionState("connecting");
@@ -65,7 +123,7 @@ export function PersonaPlayer() {
           setError(message);
           setConnectionState("error");
         },
-        onMessagesUpdated: setMessages,
+        onMessagesUpdated: handleMessagesUpdated,
       });
 
       await client.streamToVideoElement("avatar-video");
@@ -73,7 +131,7 @@ export function PersonaPlayer() {
       setError(err instanceof Error ? err.message : "Failed to start session");
       setConnectionState("error");
     }
-  }, []);
+  }, [handleMessagesUpdated]);
 
   const stopSession = useCallback(() => {
     if (clientRef.current) {
@@ -82,6 +140,7 @@ export function PersonaPlayer() {
     }
     setConnectionState("idle");
     setMessages([]);
+    lastProcessedUserMessageId.current = null;
   }, []);
 
   useEffect(() => {
@@ -94,7 +153,7 @@ export function PersonaPlayer() {
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto">
-      {/* Video container - 3:2 aspect ratio (720x480) */}
+      {/* Video container */}
       <div className="relative aspect-[3/2] bg-black rounded-lg overflow-hidden">
         <video
           id="avatar-video"
@@ -133,12 +192,19 @@ export function PersonaPlayer() {
         )}
 
         {connectionState === "connected" && (
-          <button
-            onClick={stopSession}
-            className="absolute top-4 right-4 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
-          >
-            End session
-          </button>
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            {isResponding && (
+              <span className="px-2 py-1 bg-yellow-600 text-white text-xs rounded">
+                Thinking...
+              </span>
+            )}
+            <button
+              onClick={stopSession}
+              className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+            >
+              End session
+            </button>
+          </div>
         )}
       </div>
 
@@ -158,7 +224,7 @@ export function PersonaPlayer() {
                 }`}
               >
                 <span className="font-medium">
-                  {msg.role === "user" ? "You" : "Persona"}:
+                  {msg.role === "user" ? "You" : "Assistant"}:
                 </span>{" "}
                 {msg.content}
               </div>
