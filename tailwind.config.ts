@@ -52,10 +52,10 @@ const config: Config = {
               color: '#fafafa',
             },
             p: {
-              color: '#a3a3a3',
+              color: 'rgb(209, 213, 219)',
             },
             li: {
-              color: '#a3a3a3',
+              color: 'rgb(209, 213, 219)',
             },
             a: {
               color: '#60a5fa',

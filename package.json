@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "update-org-members": "./scripts/update-org-members.sh"
   },
   "dependencies": {
     "@types/mdx": "^2.0.13",

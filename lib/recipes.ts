@@ -11,7 +11,7 @@ export interface RecipeFrontmatter {
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   sdk?: 'javascript' | 'python' | 'react' | 'react-native';
   date: string;
-  author: string;
+  authors: string[]; // GitHub usernames
 }
 
 export interface Recipe {
