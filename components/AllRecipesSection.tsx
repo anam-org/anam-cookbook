@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { RecipeSummary } from '@/lib/recipes';
 import { RecipeListItem } from './RecipeListItem';
+import { TagFilter } from './TagFilter';
 
 interface AllRecipesSectionProps {
   recipes: RecipeSummary[];
@@ -34,32 +35,15 @@ export function AllRecipesSection({ recipes, allTags }: AllRecipesSectionProps) 
         </div>
 
         {/* Filter dropdown */}
-        <div className="relative">
-          <select
-            value={selectedTag || ''}
-            onChange={(e) => setSelectedTag(e.target.value || null)}
-            className="appearance-none bg-transparent text-slate-600 dark:text-neutral-400 text-sm pr-6 cursor-pointer hover:text-slate-900 dark:hover:text-neutral-200 focus:outline-none"
-          >
-            <option value="">Filter</option>
-            {visibleTags.map((tag) => (
-              <option key={tag} value={tag}>
-                {tag}
-              </option>
-            ))}
-          </select>
-          <svg
-            className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-neutral-500 pointer-events-none"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </div>
+        <TagFilter
+          tags={visibleTags}
+          selectedTag={selectedTag}
+          onTagSelect={setSelectedTag}
+        />
       </div>
 
       {/* Recipe list */}
-      <div className="divide-y divide-slate-200 dark:divide-neutral-800">
+      <div className="divide-y divide-slate-200/60 dark:divide-neutral-700/50">
         {filteredRecipes.map((recipe) => (
           <RecipeListItem key={recipe.slug} recipe={recipe} />
         ))}

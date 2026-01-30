@@ -30,7 +30,7 @@ export function CodeBlock({ code, language, highlightedHtml, filename }: CodeBlo
       )}
       <button
         onClick={handleCopy}
-        className="absolute right-2 top-2 p-2 rounded-md bg-white/10 text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-white/20 hover:text-slate-200 transition-all z-10"
+        className="absolute right-2 top-2 p-2 rounded-md bg-white/10 text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-white/20 hover:text-slate-200 active:bg-white/30 motion-safe:transition-[opacity,background-color,color] motion-reduce:transition-none z-10"
         style={{ top: filename ? '3rem' : '0.5rem' }}
         aria-label="Copy code"
       >

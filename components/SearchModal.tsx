@@ -17,12 +17,17 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
   const filteredRecipes = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
-    return recipes.filter((recipe) => {
+    const results = [];
+    for (const recipe of recipes) {
+      if (results.length >= 8) break;
       const matchesTitle = recipe.frontmatter.title.toLowerCase().includes(q);
       const matchesDescription = recipe.frontmatter.description.toLowerCase().includes(q);
       const matchesTags = recipe.frontmatter.tags?.some((tag) => tag.toLowerCase().includes(q));
-      return matchesTitle || matchesDescription || matchesTags;
-    }).slice(0, 8);
+      if (matchesTitle || matchesDescription || matchesTags) {
+        results.push(recipe);
+      }
+    }
+    return results;
   }, [query, recipes]);
 
   // Focus input when modal opens and handle native input events
@@ -62,20 +67,20 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100]">
+    <div className="fixed inset-0 z-40" role="dialog" aria-label="Search recipes">
       {/* Backdrop */}
-      <div 
+      <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
       />
-      
+
       {/* Modal */}
       <div className="relative flex flex-col items-center pt-[15vh] px-4">
         <div className="w-full max-w-xl">
           {/* Search Input */}
           <div className="relative">
             <svg
-              className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-400"
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 dark:text-neutral-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -93,11 +98,13 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search..."
-              className="w-full pl-12 pr-12 py-4 bg-neutral-800 border border-neutral-700 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-600 focus:border-transparent text-lg"
+              aria-label="Search recipes"
+              className="w-full pl-12 pr-12 py-4 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl text-slate-900 dark:text-neutral-100 placeholder-slate-400 dark:placeholder-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-neutral-600 focus-visible:border-transparent text-lg"
             />
             <button
               onClick={onClose}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 transition-colors"
+              aria-label="Close search (Escape)"
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-neutral-500 hover:text-slate-700 dark:hover:text-neutral-300 active:text-slate-900 dark:active:text-neutral-200 motion-safe:transition-colors motion-reduce:transition-none"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -107,20 +114,20 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
 
           {/* Search Results */}
           {query.trim() && (
-            <div className="mt-3 bg-neutral-800 border border-neutral-700 rounded-xl overflow-hidden">
+            <div className="mt-3 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl overflow-hidden">
               {filteredRecipes.length > 0 ? (
-                <ul className="divide-y divide-neutral-700">
+                <ul className="divide-y divide-slate-200 dark:divide-neutral-700">
                   {filteredRecipes.map((recipe) => (
                     <li key={recipe.slug}>
                       <Link
                         href={`/${recipe.slug}`}
                         onClick={onClose}
-                        className="block px-4 py-3 hover:bg-neutral-700/50 transition-colors"
+                        className="block px-4 py-3 hover:bg-slate-100 dark:hover:bg-neutral-700/50 active:bg-slate-200 dark:active:bg-neutral-700 motion-safe:transition-colors motion-reduce:transition-none"
                       >
-                        <div className="font-medium text-neutral-100">
+                        <div className="font-medium text-slate-900 dark:text-neutral-100">
                           {recipe.frontmatter.title}
                         </div>
-                        <div className="text-sm text-neutral-400 mt-0.5 line-clamp-1">
+                        <div className="text-sm text-slate-600 dark:text-neutral-400 mt-0.5 line-clamp-1">
                           {recipe.frontmatter.description}
                         </div>
                       </Link>
@@ -128,16 +135,17 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
                   ))}
                 </ul>
               ) : (
-                <div className="px-4 py-6 text-center text-neutral-500">
-                  No recipes found for "{query}"
+                <div className="px-4 py-6 text-center text-slate-500 dark:text-neutral-500">
+                  <p>No recipes found for "{query}"</p>
+                  <p className="text-sm mt-2">Try searching for "nextjs", "javascript", or "turnkey"</p>
                 </div>
               )}
             </div>
           )}
 
           {/* Keyboard hint */}
-          <div className="mt-3 text-center text-sm text-neutral-500">
-            Press <kbd className="px-1.5 py-0.5 bg-neutral-700 rounded text-neutral-400">ESC</kbd> to close
+          <div className="mt-3 text-center text-sm text-slate-500 dark:text-neutral-500">
+            Press <kbd className="px-1.5 py-0.5 bg-slate-200 dark:bg-neutral-700 rounded text-slate-700 dark:text-neutral-400">ESC</kbd> to close
           </div>
         </div>
       </div>

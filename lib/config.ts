@@ -13,32 +13,38 @@ export const topics: TopicConfig[] = [
   {
     name: 'Agents',
     slug: 'agents',
-    gradient: 'linear-gradient(135deg, #ec4899 0%, #f472b6 50%, #fb923c 100%)',
+    // Cyan palette: ice blue → teal
+    gradient: 'linear-gradient(135deg, #D9F2F9 0%, #7DD4E8 50%, #41BEE0 100%)',
   },
   {
     name: 'Custom LLM',
     slug: 'custom-llm',
-    gradient: 'linear-gradient(135deg, #d946ef 0%, #a855f7 50%, #ec4899 100%)',
+    // Warm palette: coral → blush (reversed)
+    gradient: 'linear-gradient(135deg, #E8846A 0%, #F2B8A0 50%, #F9ECE4 100%)',
   },
   {
     name: 'RAG',
     slug: 'rag',
-    gradient: 'linear-gradient(135deg, #34d399 0%, #22c55e 50%, #14b8a6 100%)',
+    // Green palette: mint → forest green
+    gradient: 'linear-gradient(135deg, #E8F2EC 0%, #8ED4AC 50%, #3DAA7D 100%)',
   },
   {
     name: 'Tools',
     slug: 'tools',
-    gradient: 'linear-gradient(135deg, #fb923c 0%, #f59e0b 50%, #facc15 100%)',
+    // Warm cream palette: golden amber → ivory (reversed)
+    gradient: 'linear-gradient(135deg, #C9A227 0%, #E5D88A 50%, #F4F2E1 100%)',
   },
   {
     name: 'Livekit',
     slug: 'livekit',
-    gradient: 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 50%, #4f46e5 100%)',
+    // Purple palette: lavender → violet
+    gradient: 'linear-gradient(135deg, #F0EBF8 0%, #C4B0E8 50%, #8B6FCF 100%)',
   },
   {
     name: 'Anam Lab',
     slug: 'anam-lab',
-    gradient: 'linear-gradient(135deg, #60a5fa 0%, #22d3ee 50%, #5eead4 100%)',
+    // Rose palette: dusty rose → blush pink (reversed)
+    gradient: 'linear-gradient(135deg, #D4728A 0%, #E8B4C0 50%, #F9ECE4 100%)',
   },
 ];
 

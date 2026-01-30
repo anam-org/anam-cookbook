@@ -44,35 +44,51 @@ export function ThemeProvider({ children, defaultTheme = 'dark' }: ThemeProvider
     if (!mounted) return;
 
     const root = document.documentElement;
-    
+
+    // Disable transitions during theme change
+    root.classList.add('theme-transitioning');
+
     let resolved: 'dark' | 'light';
     if (theme === 'system') {
       resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     } else {
       resolved = theme;
     }
-    
+
     setResolvedTheme(resolved);
-    
+
     if (resolved === 'dark') {
       root.classList.add('dark');
     } else {
       root.classList.remove('dark');
     }
-    
+
     localStorage.setItem('theme', theme);
+
+    // Re-enable transitions after theme change is complete
+    // Use setTimeout to ensure DOM has updated
+    setTimeout(() => {
+      root.classList.remove('theme-transitioning');
+    }, 0);
   }, [theme, mounted]);
 
   // Listen for system theme changes
   useEffect(() => {
     if (theme !== 'system') return;
-    
+
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e: MediaQueryListEvent) => {
+      const root = document.documentElement;
+      root.classList.add('theme-transitioning');
+
       setResolvedTheme(e.matches ? 'dark' : 'light');
-      document.documentElement.classList.toggle('dark', e.matches);
+      root.classList.toggle('dark', e.matches);
+
+      setTimeout(() => {
+        root.classList.remove('theme-transitioning');
+      }, 0);
     };
-    
+
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [theme]);

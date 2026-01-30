@@ -18,19 +18,19 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
   return (
     <Link
       href={`/${slug}`}
-      className="group flex flex-col h-full p-6 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl hover:border-slate-300 dark:hover:border-neutral-600 hover:shadow-sm dark:hover:shadow-neutral-900/50 transition-all"
+      className="group flex flex-col h-full min-h-[200px] p-6 bg-[#F5F5F5] dark:bg-[#202122] border border-[#FF6200] rounded-xl hover:shadow-[0_0_0_3px_rgba(255,98,0,0.15)] hover:-translate-y-0.5 active:scale-[0.98] motion-safe:transition-[border-color,transform,box-shadow] motion-reduce:transition-none"
     >
+      <div className="mb-3 text-xs" style={{ fontFamily: 'Berkeley Mono, monospace', color: '#FF6200' }}>
+        {new Date(frontmatter.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+      </div>
+
       <div className="mb-4">
-        <h3 className="font-semibold text-lg text-slate-900 dark:text-neutral-50 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+        <h3 className="font-semibold text-lg text-slate-900 dark:text-neutral-50">
           {frontmatter.title}
         </h3>
       </div>
 
-      <div className="mb-4 text-xs text-slate-400 dark:text-neutral-500">
-        {new Date(frontmatter.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-      </div>
-
-      <div className="mt-auto pt-4 border-t border-slate-100 dark:border-neutral-700 flex items-center justify-between text-xs text-slate-400 dark:text-neutral-500">
+      <div className="mt-auto pt-4 border-t border-slate-200/60 dark:border-neutral-700/50 flex items-center justify-between text-xs text-slate-500 dark:text-neutral-500">
         <div className="flex flex-wrap gap-2">
           {visibleTags.slice(0, 3).map((tag) => (
             <TagBadge key={tag} tag={tag} size="sm" />
@@ -40,7 +40,7 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
           )}
         </div>
         {authors.length > 0 && (
-          <div className="flex">
+          <div className="flex -space-x-2">
             {authors.map((username, i) => (
               <Image
                 key={username}
@@ -48,8 +48,8 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
                 alt={username}
                 width={26}
                 height={26}
-                className="w-[26px] h-[26px] rounded-full ring-2 ring-white dark:ring-neutral-800"
-                style={{ marginLeft: i > 0 ? '-8px' : 0, zIndex: authors.length - i }}
+                className="w-[26px] h-[26px] rounded-full ring-2 ring-[#F5F5F5] dark:ring-[#202122]"
+                style={{ zIndex: authors.length - i }}
                 unoptimized
               />
             ))}

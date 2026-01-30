@@ -16,11 +16,11 @@ export function RecipeListItem({ recipe }: RecipeListItemProps) {
   return (
     <Link
       href={`/${slug}`}
-      className="group flex items-center justify-between gap-4 py-4 border-b border-slate-200 dark:border-neutral-800 hover:bg-slate-50 dark:hover:bg-neutral-800/50 -mx-4 px-4 transition-colors"
+      className="group flex items-center justify-between gap-4 py-2.5 hover:bg-slate-100/40 dark:hover:bg-neutral-800/30 active:bg-slate-200/40 dark:active:bg-neutral-800/40 -mx-4 px-4 motion-safe:transition-colors motion-reduce:transition-none"
     >
       {/* Left side: Title */}
       <div className="flex-1 min-w-0">
-        <h3 className="font-medium text-slate-900 dark:text-neutral-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors truncate">
+        <h3 className="font-medium text-slate-900 dark:text-neutral-100 truncate">
           {frontmatter.title}
         </h3>
       </div>
@@ -33,7 +33,7 @@ export function RecipeListItem({ recipe }: RecipeListItemProps) {
       </div>
 
       {/* Right side: Date */}
-      <div className="text-sm text-slate-500 dark:text-neutral-500 flex-shrink-0 w-24 text-right">
+      <div className="text-xs flex-shrink-0 w-28 text-right" style={{ fontFamily: 'Berkeley Mono, monospace', color: '#FF6200' }}>
         {new Date(frontmatter.date).toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',

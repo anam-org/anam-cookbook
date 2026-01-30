@@ -2,8 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: 'Berkeley Mono';
+  src: url('/fonts/BerkeleyMonoTrial-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Disable all transitions during theme change */
+html.theme-transitioning,
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
 :root {
-  --background: 249 250 251;
+  --background: 245 245 245; /* #F5F5F5 */
   --foreground: 15 23 42;
   --muted: 100 116 139;
   --card: 255 255 255;
@@ -12,7 +29,7 @@
 }
 
 .dark {
-  --background: 23 23 23;
+  --background: 32 33 34; /* #202122 */
   --foreground: 250 250 250;
   --muted: 163 163 163;
   --card: 38 38 38;
@@ -21,7 +38,14 @@
 }
 
 body {
-  @apply bg-slate-50 dark:bg-neutral-900 text-slate-900 dark:text-neutral-50 antialiased transition-colors duration-200;
+  background-color: #F5F5F5;
+  color: rgb(15 23 42);
+  @apply antialiased;
+}
+
+.dark body {
+  background-color: #202122;
+  color: rgb(250 250 250);
 }
 
 /* Code blocks - let Shiki handle background via inline styles */
@@ -33,19 +57,38 @@ pre code {
   @apply block text-sm leading-relaxed;
 }
 
-/* Scrollbar styling for dark mode */
+/* Scrollbar styling - both modes */
+:root {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225) #F5F5F5; /* slate-300 / #F5F5F5 */
+}
+
 .dark {
-  scrollbar-color: rgb(82 82 82) rgb(38 38 38);
+  scrollbar-color: rgb(82 82 82) #202122;
   scrollbar-width: thin;
 }
 
-.dark ::-webkit-scrollbar {
+/* Webkit scrollbars */
+::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
+::-webkit-scrollbar-track {
+  background: #F5F5F5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(203 213 225); /* slate-300 */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(148 163 184); /* slate-400 */
+}
+
 .dark ::-webkit-scrollbar-track {
-  background: rgb(38 38 38);
+  background: #202122;
 }
 
 .dark ::-webkit-scrollbar-thumb {

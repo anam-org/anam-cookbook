@@ -15,15 +15,15 @@ export const metadata: Metadata = {
 
 function Footer() {
   return (
-    <footer className="border-t border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mt-auto">
+    <footer className="border-t border-slate-200/60 dark:border-neutral-700/50 bg-[#F5F5F5] dark:bg-[#202122] mt-auto">
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="flex items-center justify-between text-sm text-slate-500 dark:text-neutral-400">
           <p>&copy; {new Date().getFullYear()} Anam AI. All rights reserved.</p>
           <div className="flex items-center gap-4">
-            <Link href="https://anam.ai" className="hover:text-slate-700 dark:hover:text-neutral-200 transition-colors">
+            <Link href="https://anam.ai" className="hover:text-slate-700 dark:hover:text-neutral-200 active:text-slate-900 dark:active:text-neutral-100 motion-safe:transition-colors motion-reduce:transition-none">
               anam.ai
             </Link>
-            <Link href="https://lab.anam.ai" className="hover:text-slate-700 dark:hover:text-neutral-200 transition-colors">
+            <Link href="https://lab.anam.ai" className="hover:text-slate-700 dark:hover:text-neutral-200 active:text-slate-900 dark:active:text-neutral-100 motion-safe:transition-colors motion-reduce:transition-none">
               Anam Lab
             </Link>
           </div>
@@ -48,18 +48,43 @@ export default function RootLayout({
             __html: `
               (function() {
                 try {
-                  var theme = localStorage.getItem('theme');
-                  if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                  // Prevent transitions on initial load
+                  document.documentElement.classList.add('theme-transitioning');
+
+                  const theme = localStorage.getItem('theme');
+                  if (theme === 'dark') {
                     document.documentElement.classList.add('dark');
+                    document.documentElement.style.colorScheme = 'dark';
+                  } else {
+                    document.documentElement.style.colorScheme = 'light';
                   }
+
+                  // Re-enable transitions after initial render
+                  setTimeout(() => {
+                    document.documentElement.classList.remove('theme-transitioning');
+                  }, 0);
                 } catch (e) {}
               })();
             `,
           }}
         />
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+              html {
+                background-color: #F5F5F5;
+                color-scheme: light;
+              }
+              html.dark {
+                background-color: #202122;
+                color-scheme: dark;
+              }
+            `,
+          }}
+        />
       </head>
       <body className={`${inter.className} min-h-screen flex flex-col`}>
-        <ThemeProvider defaultTheme="dark">
+        <ThemeProvider defaultTheme="light">
           <Header recipes={recipes} />
           <main className="flex-1">{children}</main>
           <Footer />
