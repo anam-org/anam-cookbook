@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: RecipePageProps) {
   const recipe = getRecipeBySlug(slug);
 
   if (!recipe) {
-    return { title: 'Recipe Not Found' };
+    return { title: 'Cookbook Not Found' };
   }
 
   return {
@@ -41,19 +41,6 @@ export default async function RecipePage({ params }: RecipePageProps) {
 
   return (
     <article className="max-w-3xl mx-auto px-4 py-12">
-      {/* Breadcrumb */}
-      <nav className="mb-8">
-        <Link
-          href="/"
-          className="text-sm text-slate-500 dark:text-neutral-400 hover:text-slate-700 dark:hover:text-neutral-200 active:text-slate-900 dark:active:text-neutral-100 motion-safe:transition-colors motion-reduce:transition-none flex items-center gap-1"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to recipes
-        </Link>
-      </nav>
-
       {/* Header */}
       <header className="mb-12">
         <p className="text-sm mb-4 text-center" style={{ fontFamily: 'Berkeley Mono, monospace', color: '#FF6200' }}>

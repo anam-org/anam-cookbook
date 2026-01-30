@@ -18,21 +18,21 @@ export function Header({ recipes = [] }: HeaderProps) {
   return (
     <>
       <header className="border-b border-slate-200/60 dark:border-neutral-700/50 bg-[#F5F5F5]/80 dark:bg-[#202122]/80 backdrop-blur-md sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="px-6 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-baseline gap-2">
             <AnamLogo className="text-slate-900 dark:text-neutral-50 translate-y-[1px]" height={18} width={54} />
-            <span className="text-slate-500 dark:text-neutral-400 font-normal text-lg">Cookbook</span>
+            <span className="text-slate-900 dark:text-neutral-100 font-normal text-lg">Cookbook</span>
           </Link>
           <nav className="flex items-center gap-4 text-sm">
             <Link
               href="https://docs.anam.ai"
-              className="text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-neutral-100 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none"
+              className="text-slate-900 dark:text-neutral-100 hover:text-slate-600 dark:hover:text-neutral-300 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none"
             >
               Docs
             </Link>
             <Link
               href="https://docs.anam.ai/api-reference"
-              className="text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-neutral-100 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none flex items-center gap-1"
+              className="text-slate-900 dark:text-neutral-100 hover:text-slate-600 dark:hover:text-neutral-300 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none flex items-center gap-1"
             >
               API Reference
               <svg className="w-3 h-3 opacity-50" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -41,7 +41,7 @@ export function Header({ recipes = [] }: HeaderProps) {
             </Link>
             <Link
               href="https://github.com/anam-org/anam-cookbook"
-              className="text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-neutral-100 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none flex items-center gap-1"
+              className="text-slate-900 dark:text-neutral-100 hover:text-slate-600 dark:hover:text-neutral-300 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none flex items-center gap-1"
             >
               Source
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">

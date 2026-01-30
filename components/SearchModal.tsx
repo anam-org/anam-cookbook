@@ -20,8 +20,8 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
     const results = [];
     for (const recipe of recipes) {
       if (results.length >= 8) break;
-      const matchesTitle = recipe.frontmatter.title.toLowerCase().includes(q);
-      const matchesDescription = recipe.frontmatter.description.toLowerCase().includes(q);
+      const matchesTitle = recipe.frontmatter.title?.toLowerCase().includes(q);
+      const matchesDescription = recipe.frontmatter.description?.toLowerCase().includes(q);
       const matchesTags = recipe.frontmatter.tags?.some((tag) => tag.toLowerCase().includes(q));
       if (matchesTitle || matchesDescription || matchesTags) {
         results.push(recipe);
@@ -67,7 +67,7 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-40" role="dialog" aria-label="Search recipes">
+    <div className="fixed inset-0 z-40" role="dialog" aria-label="Search cookbooks">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -98,7 +98,7 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search..."
-              aria-label="Search recipes"
+              aria-label="Search cookbooks"
               className="w-full pl-12 pr-12 py-4 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl text-slate-900 dark:text-neutral-100 placeholder-slate-400 dark:placeholder-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 dark:focus-visible:ring-neutral-600 focus-visible:border-transparent text-lg"
             />
             <button
@@ -136,7 +136,7 @@ export function SearchModal({ isOpen, onClose, recipes }: SearchModalProps) {
                 </ul>
               ) : (
                 <div className="px-4 py-6 text-center text-slate-500 dark:text-neutral-500">
-                  <p>No recipes found for "{query}"</p>
+                  <p>No cookbooks found for "{query}"</p>
                   <p className="text-sm mt-2">Try searching for "nextjs", "javascript", or "turnkey"</p>
                 </div>
               )}

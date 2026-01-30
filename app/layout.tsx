@@ -10,7 +10,7 @@ const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'Anam Cookbook',
-  description: 'Recipes and examples for building with Anam AI avatars',
+  description: 'Cookbooks and examples for building with Anam AI avatars',
 };
 
 function Footer() {

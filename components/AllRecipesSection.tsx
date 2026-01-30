@@ -42,7 +42,7 @@ export function AllRecipesSection({ recipes, allTags }: AllRecipesSectionProps) 
         />
       </div>
 
-      {/* Recipe list */}
+      {/* Cookbook list */}
       <div className="divide-y divide-slate-200/60 dark:divide-neutral-700/50">
         {filteredRecipes.map((recipe) => (
           <RecipeListItem key={recipe.slug} recipe={recipe} />
@@ -51,7 +51,7 @@ export function AllRecipesSection({ recipes, allTags }: AllRecipesSectionProps) 
 
       {filteredRecipes.length === 0 && (
         <div className="py-12 text-center text-slate-500 dark:text-neutral-500">
-          No recipes found{selectedTag ? ` for "${selectedTag}"` : ''}.
+          No cookbooks found{selectedTag ? ` for "${selectedTag}"` : ''}.
         </div>
       )}
     </section>

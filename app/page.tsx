@@ -17,7 +17,7 @@ export default function HomePage() {
       {/* Featured Cookbooks Section */}
       <FeaturedSection recipes={featuredRecipes} />
 
-      {/* All Recipes Section */}
+      {/* All Cookbooks Section */}
       <AllRecipesSection recipes={allRecipes} allTags={allTags} />
     </div>
   );

@@ -12,7 +12,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggleTheme}
-      className="p-3 text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-neutral-100 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none"
+      className="p-3 text-slate-900 dark:text-neutral-100 hover:text-slate-600 dark:hover:text-neutral-300 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none"
       aria-label={`Currently ${resolvedTheme} mode. Click to switch.`}
     >
       {resolvedTheme === 'dark' ? (

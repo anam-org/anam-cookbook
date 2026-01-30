@@ -8,8 +8,8 @@ export function SearchButton({ onClick }: SearchButtonProps) {
   return (
     <button
       onClick={onClick}
-      className="p-3 text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-neutral-100 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none"
-      aria-label="Search recipes"
+      className="p-3 text-slate-900 dark:text-neutral-100 hover:text-slate-600 dark:hover:text-neutral-300 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none"
+      aria-label="Search cookbooks"
     >
       <svg
         className="w-[18px] h-[18px]"

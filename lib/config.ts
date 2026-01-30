@@ -8,7 +8,7 @@ export interface TopicConfig {
 }
 
 // Topics displayed at the top of the homepage
-// Each topic links to a filtered view of recipes with that tag
+// Each topic links to a filtered view of cookbooks with that tag
 export const topics: TopicConfig[] = [
   {
     name: 'Agents',
@@ -48,7 +48,7 @@ export const topics: TopicConfig[] = [
   },
 ];
 
-// Slugs of featured recipes to show in the "Featured Cookbooks" section
+// Slugs of featured cookbooks to show in the "Featured Cookbooks" section
 // Order matters - first items appear first
 export const featuredRecipeSlugs: string[] = [
   'getting-started-with-anam',

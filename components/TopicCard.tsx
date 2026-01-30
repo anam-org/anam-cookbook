@@ -8,8 +8,8 @@ interface TopicCardProps {
 export function TopicCard({ topic }: TopicCardProps) {
   return (
     <Link
-      href={`/?topic=${topic.slug}`}
-      className="group relative flex items-center justify-center h-28 rounded-xl overflow-hidden hover:scale-[1.02] hover:shadow-lg transition-all duration-200"
+      href={`/topic/${topic.slug}`}
+      className="group relative flex items-center justify-center h-[132px] rounded-xl overflow-hidden hover:scale-[1.02] hover:shadow-lg transition-all duration-200"
       style={{ background: topic.gradient }}
     >
       {/* Subtle overlay for better text readability */}
