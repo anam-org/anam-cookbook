@@ -51,7 +51,7 @@ export const topics: TopicConfig[] = [
 // Slugs of featured cookbooks to show in the "Featured Cookbooks" section
 // Order matters - first items appear first
 export const featuredRecipeSlugs: string[] = [
-  'getting-started-with-anam',
+  'basic-nextjs-app',
   'getting-started-with-livekit',
   'elevenlabs-conversational-agents',
   'client-side-tools',

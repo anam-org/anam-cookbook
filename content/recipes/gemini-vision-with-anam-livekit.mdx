@@ -1,0 +1,333 @@
+---
+title: Using Gemini Vision with Anam in LiveKit
+description: Build an AI onboarding assistant that can see the user's screen and fill out forms
+tags: [livekit, python, agents]
+difficulty: intermediate
+sdk: python
+date: 2025-01-19
+authors: [stukennedy]
+---
+
+LiveKit agents can do more than just talk—they can see. By combining Gemini's vision capabilities with Anam avatars, you can build assistants that watch the user's screen and take action on what they see.
+
+In this cookbook, we'll build an HR onboarding assistant. The user shares their screen showing an employee form, and the assistant guides them through filling it out. When the user provides information verbally, the assistant uses function tools to fill in the form fields automatically.
+
+The complete code is at [anam-org/anam-livekit-demo](https://github.com/anam-org/anam-livekit-demo).
+
+## What you'll build
+
+An onboarding assistant that:
+- Displays an Anam avatar as the visual interface
+- Uses Gemini Live for voice conversation and screen understanding
+- Watches the user's screen share to see form fields
+- Fills out forms automatically using function tools
+- Runs as a LiveKit agent that joins rooms on demand
+
+## How the pieces fit together
+
+This demo combines three services:
+
+- **Gemini Live** handles the conversation by listening to the user's voice, processing their screen share, and deciding what to say or do
+- **Anam** generates the avatar video, synchronized to the agent's speech
+- **LiveKit** ties it all together, routing audio and video between the user, the agent, and the avatar
+
+When the user speaks, their audio goes to Gemini. Gemini can also see frames from the user's screen share. Based on what it hears and sees, Gemini responds with text, which Anam turns into avatar video. Gemini can also call function tools to interact with the page.
+
+## Prerequisites
+
+- Python 3.9+
+- A [LiveKit Cloud](https://cloud.livekit.io) account
+- A [Gemini API key](https://aistudio.google.com/apikey)
+- An Anam API key from [lab.anam.ai](https://lab.anam.ai)
+
+## Project setup
+
+Clone the demo repository:
+
+```bash
+git clone https://github.com/anam-org/anam-livekit-demo.git
+cd anam-livekit-demo/agent
+```
+
+Create a virtual environment and install dependencies:
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+The key dependencies are:
+- `livekit-agents` - The LiveKit agent framework
+- `livekit-plugins-google` - Gemini Live integration
+- `livekit-plugins-anam` - Anam avatar integration
+
+Create a `.env` file with your credentials:
+
+```bash
+# LiveKit Cloud credentials
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your_api_key
+LIVEKIT_API_SECRET=your_api_secret
+
+# Anam
+ANAM_API_KEY=your_anam_key
+ANAM_AVATAR_ID=your_avatar_id
+
+# Google Gemini
+GEMINI_API_KEY=your_gemini_key
+```
+
+You can find avatar IDs at [lab.anam.ai/avatars](https://lab.anam.ai/avatars).
+
+## Understanding the agent code
+
+Let's walk through `agent.py`. We'll start with the imports and setup:
+
+```python
+import asyncio
+import json
+import logging
+import os
+from pathlib import Path
+from typing import Optional
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
+
+from livekit import rtc
+from livekit.agents import (
+    Agent,
+    AgentSession,
+    AutoSubscribe,
+    JobContext,
+    WorkerOptions,
+    cli,
+    function_tool,
+)
+from livekit.agents.voice import VoiceActivityVideoSampler, room_io
+from livekit.plugins import anam, google
+```
+
+We import the LiveKit agent framework, the Anam and Google plugins, and the `function_tool` decorator for creating tools the agent can call.
+
+### Function tools for browser control
+
+The agent needs a way to interact with the frontend. We use LiveKit's data channel to send commands:
+
+```python
+_current_room: Optional[rtc.Room] = None
+
+async def send_control_command(command: str, data: dict) -> None:
+    """Send a control command to the frontend via data channel."""
+    if _current_room is None:
+        return
+
+    message = json.dumps({"type": command, **data})
+    await _current_room.local_participant.publish_data(
+        message.encode("utf-8"),
+        reliable=True,
+        topic="browser-control",
+    )
+```
+
+This sends JSON messages to the frontend, which listens on the `browser-control` topic and executes the commands.
+
+Now we define the tools themselves. The `@function_tool` decorator exposes these to Gemini:
+
+```python
+@function_tool
+async def fill_form_field(field_identifier: str, value: str) -> str:
+    """Fill in a form field on the current page.
+
+    Args:
+        field_identifier: The field to fill (e.g. "Full Name", "Email Address")
+        value: The value to enter into the field
+
+    Returns:
+        A confirmation message
+    """
+    await send_control_command(
+        "fill_field", {"field": field_identifier, "value": value}
+    )
+    return "ok"
+
+
+@function_tool
+async def click_element(element_description: str) -> str:
+    """Click a button or link on the page.
+
+    Args:
+        element_description: Button/element text (e.g. "Submit", "Next")
+
+    Returns:
+        A confirmation message
+    """
+    await send_control_command("click", {"element": element_description})
+    return "ok"
+```
+
+The docstrings are important. Gemini uses them to understand when and how to call each tool. When the user says "My name is John Smith", Gemini sees the form on screen, understands it needs to fill the name field, and calls `fill_form_field("Full Name", "John Smith")`.
+
+### The agent entry point
+
+The `entrypoint` function runs when the agent joins a room:
+
+```python
+async def entrypoint(ctx: JobContext):
+    await ctx.connect(auto_subscribe=AutoSubscribe.SUBSCRIBE_ALL)
+
+    global _current_room
+    _current_room = ctx.room
+```
+
+We connect to the room and subscribe to all tracks. The `SUBSCRIBE_ALL` option means we'll receive the user's screen share video, which is essential for vision.
+
+### Agent instructions
+
+The instructions tell Gemini how to behave and what tools are available:
+
+```python
+    instructions = (
+        "You are Maya, a friendly HR onboarding assistant. "
+        "You can see the user's screen share.\n\n"
+        "THE FORM HAS THESE 6 FIELDS (fill ALL before submitting):\n"
+        "1. Full Name\n"
+        "2. Email Address\n"
+        "3. Phone Number\n"
+        "4. Department\n"
+        "5. Job Title\n"
+        "6. Start Date\n\n"
+        "Tools:\n"
+        "- fill_form_field(field_name, value) - use EXACT field names above\n"
+        "- click_element('Submit') - ONLY after ALL 6 fields are filled\n\n"
+        "IMPORTANT: You MUST fill ALL 6 fields before clicking Submit."
+    )
+```
+
+Being explicit about field names helps Gemini use the tools correctly. The instructions also prevent premature form submission.
+
+### Creating the models
+
+Now we set up Gemini and Anam:
+
+```python
+    # Create Gemini Live realtime model
+    llm = google.realtime.RealtimeModel(
+        api_key=os.environ.get("GEMINI_API_KEY"),
+        voice="Aoede",
+        instructions=instructions,
+    )
+
+    # Create Anam Avatar session
+    avatar = anam.AvatarSession(
+        persona_config=anam.PersonaConfig(
+            name="Maya",
+            avatarId=os.environ.get("ANAM_AVATAR_ID")
+        ),
+        api_key=os.environ.get("ANAM_API_KEY"),
+    )
+```
+
+Gemini handles the conversation logic and voice output. The `voice` parameter sets Gemini's TTS voice. Anam takes that audio and generates synchronized avatar video.
+
+### Video sampling for vision
+
+For screen share analysis, we configure how often to send frames to Gemini:
+
+```python
+    session = AgentSession(
+        llm=llm,
+        video_sampler=VoiceActivityVideoSampler(
+            speaking_fps=0.2,  # 1 frame every 5 seconds while speaking
+            silent_fps=0.1,    # 1 frame every 10 seconds while silent
+        ),
+        tools=[fill_form_field, click_element],
+    )
+```
+
+The `VoiceActivityVideoSampler` is efficient, it samples more frequently during active conversation and less during silence. This keeps Gemini aware of screen changes without overwhelming it with frames.
+
+### Starting everything
+
+Finally, we start the avatar and agent:
+
+```python
+    await avatar.start(session, room=ctx.room)
+    await session.start(
+        agent=Agent(instructions=instructions),
+        room=ctx.room,
+        room_input_options=room_io.RoomInputOptions(video_enabled=True),
+    )
+```
+
+The `video_enabled=True` option tells the agent to accept video input (the screen share). The avatar starts first so it's ready to display when the agent begins speaking.
+
+### Running the agent
+
+The main block starts the agent worker:
+
+```python
+if __name__ == "__main__":
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+```
+
+## Running the demo
+
+Start the agent in development mode:
+
+```bash
+python agent.py dev
+```
+
+The agent connects to LiveKit Cloud and waits for rooms to be created.
+
+For the frontend, go back to the repository root and start the Next.js app:
+
+```bash
+cd ..
+pnpm install
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). You'll see a demo onboarding form. Click to connect, then share your screen. The avatar will greet you and guide you through filling out the form.
+
+Try saying things like:
+- "My name is John Smith"
+- "My email is john@example.com"
+- "I'm starting in the Engineering department as a Senior Developer"
+
+The assistant will fill in the fields as you provide information.
+
+## Adapting for your use case
+
+The onboarding form is just one example. The same pattern works for:
+
+- **Technical support** - Watch the user's screen and guide them through troubleshooting
+- **Education** - See what the student is working on and provide contextual help
+- **Data entry** - Fill out complex forms based on verbal input
+- **Accessibility** - Help users who have difficulty using a keyboard
+
+To adapt the demo:
+
+1. Update the instructions to describe your use case and available fields
+2. Modify the function tools to match your frontend's expectations
+3. Update the frontend to handle the control commands appropriately
+
+## Deploying to production
+
+For production, run without the `dev` flag:
+
+```bash
+python agent.py
+```
+
+The repository includes a Dockerfile for containerized deployments:
+
+```bash
+docker build -t onboarding-agent .
+docker run --env-file .env onboarding-agent
+```
+
+See the [LiveKit deployment docs](https://docs.livekit.io/agents/deployment/) for Kubernetes and cloud platform guides.
