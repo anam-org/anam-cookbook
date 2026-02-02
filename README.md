@@ -16,7 +16,7 @@ npm install @anam-ai/js-sdk
 
 ## Example code
 
-Many cookbook articles include working examples in the [`examples/`](examples/) directory.
+Some cookbook articles include working examples in the [`examples/`](examples/) directory.
 
 ## Additional resources
 
