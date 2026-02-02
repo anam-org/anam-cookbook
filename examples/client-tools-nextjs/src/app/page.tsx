@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { ClientToolsPlayer } from "@/components/ClientToolsPlayer";
 
 export default function Home() {
   return (
@@ -20,23 +19,19 @@ export default function Home() {
           </Link>
         </nav>
 
-        <div className="flex flex-col lg:flex-row gap-8 items-start">
-          <div className="flex-1 space-y-4">
-            <h1 className="text-3xl font-bold text-gray-900">
-              Welcome to Our Site
-            </h1>
-            <p className="text-gray-600">
-              This demo shows how Anam avatars can control your application
-              using client-side tools. The avatar can navigate between pages
-              based on voice commands.
-            </p>
-            <p className="text-gray-600">
-              Ask the avatar to show you the pricing page, features, or contact
-              information.
-            </p>
-          </div>
-
-          <ClientToolsPlayer />
+        <div className="space-y-4">
+          <h1 className="text-3xl font-bold text-gray-900">
+            Welcome to Our Site
+          </h1>
+          <p className="text-gray-600">
+            This demo shows how Anam avatars can control your application using
+            client-side tools. The avatar can navigate between pages based on
+            voice commands.
+          </p>
+          <p className="text-gray-600">
+            Ask the avatar to show you the pricing page, features, or contact
+            information. The avatar stays active as you navigate between pages.
+          </p>
         </div>
       </div>
     </main>

@@ -12,6 +12,7 @@ export async function POST() {
   }
 
   try {
+    console.log("Generating session token for persona:", personaConfig);
     const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
       method: "POST",
       headers: {
@@ -20,6 +21,8 @@ export async function POST() {
       },
       body: JSON.stringify({ personaConfig }),
     });
+
+    console.log("Response:", response);
 
     if (!response.ok) {
       const error = await response.text();
@@ -31,6 +34,7 @@ export async function POST() {
     }
 
     const data = await response.json();
+    console.log("Data:", data);
     return NextResponse.json({ sessionToken: data.sessionToken });
   } catch (error) {
     console.error("Error fetching session token:", error);

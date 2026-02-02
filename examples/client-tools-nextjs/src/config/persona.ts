@@ -7,6 +7,7 @@ You can navigate users to different pages when they ask to see specific content.
 Available pages: home, pricing, features, contact.
 When a user asks to see a page, use the navigate_to_page tool.
 Keep your responses brief and conversational.`,
+  llmId: "0934d97d-0c3a-4f33-91b0-5e136a0ef466",
   tools: [
     {
       type: "client",
