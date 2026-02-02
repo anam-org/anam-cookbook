@@ -23,9 +23,25 @@ export async function generateMetadata({ params }: RecipePageProps) {
     return { title: 'Cookbook Not Found' };
   }
 
+  const title = `${recipe.frontmatter.title} | Anam Cookbook`;
+  const description = recipe.frontmatter.description || 'A guide from the Anam Cookbook';
+  const url = `https://cookbook.anam.ai/${slug}`;
+
   return {
-    title: `${recipe.frontmatter.title} | Anam Cookbook`,
-    description: recipe.frontmatter.description,
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      url,
+      type: 'article',
+      publishedTime: recipe.frontmatter.date,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+    },
   };
 }
 

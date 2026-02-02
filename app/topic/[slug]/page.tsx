@@ -23,9 +23,24 @@ export async function generateMetadata({ params }: TopicPageProps) {
     return { title: 'Topic Not Found' };
   }
 
+  const title = `${topic.name} - Anam Cookbook`;
+  const description = `Explore ${topic.name.toLowerCase()} cookbooks and tutorials for building with Anam AI avatars.`;
+  const url = `https://cookbook.anam.ai/topic/${slug}`;
+
   return {
-    title: `${topic.name} - Anam Cookbook`,
-    description: `Explore ${topic.name.toLowerCase()} cookbooks and tutorials for building with Anam AI avatars.`,
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      url,
+      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+    },
   };
 }
 
