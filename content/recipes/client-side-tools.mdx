@@ -1,9 +1,6 @@
 ---
 title: Client-side tools
-description: Let your AI avatar trigger actions in your application like navigation, modals, and UI updates.
-tags: [tools, javascript, turnkey]
-difficulty: intermediate
-sdk: javascript
+tags: [tools, javascript, agents]
 date: 2025-01-21
 authors: [ao-anam]
 ---
@@ -16,7 +13,7 @@ The complete example code is available at [examples/client-tools-nextjs](https:/
 
 ## What you'll build
 
-A Next.js application with multiple pages where the avatar can navigate users based on voice commands. When a user says "show me the pricing page", the avatar responds and navigates to `/pricing`.
+A Next.js application with multiple pages where the avatar can navigate users based on voice commands. When a user says "show me the pricing page", the avatar responds and navigates to `/pricing`. The avatar persists in a fixed overlay, so the session stays active as users move between pages.
 
 ## Prerequisites
 
@@ -40,9 +37,79 @@ Create an `.env.local` file with your API key.
 ANAM_API_KEY=your_anam_api_key_here
 ```
 
-## Defining the tool
+## Setting up the persona
 
-Client tools are defined using a JSON schema that tells the LLM when and how to use them. We'll define a `navigate_to_page` tool that accepts a page name.
+First, let's create a basic persona config. This defines the avatar's appearance, voice, and personality.
+
+```typescript
+// src/config/persona.ts
+
+export const personaConfig = {
+  name: "Website Assistant",
+  avatarId: "edf6fdcb-acab-44b8-b974-ded72665ee26",
+  voiceId: "6bfbe25a-979d-40f3-a92b-5394170af54b",
+  systemPrompt: `You are a helpful assistant for our company website.
+Keep your responses brief and conversational.`,
+  llmId: "0934d97d-0c3a-4f33-91b0-5e136a0ef466",
+};
+```
+
+This gives us a working avatar that can have conversations. But right now it can only talk. It can't actually do anything in our app.
+
+## Adding a client tool
+
+Client tools let the avatar trigger actions in your frontend. We define them using a JSON schema that tells the LLM what the tool does and what parameters it accepts.
+
+Let's create a `navigate_to_page` tool:
+
+```typescript
+const navigateTool = {
+  type: "client",
+  name: "navigate_to_page",
+  description:
+    "Navigate to a specific page when the user asks to see pricing, features, contact information, or wants to go to a different section of the site.",
+  parameters: {
+    type: "object",
+    properties: {
+      page: {
+        type: "string",
+        description: "The page to navigate to",
+        enum: ["home", "pricing", "features", "contact"],
+      },
+    },
+    required: ["page"],
+  },
+};
+```
+
+The tool definition has four parts:
+
+- **type** - Must be `"client"` for tools that trigger events in your app
+- **name** - A unique identifier the LLM uses to call the tool
+- **description** - Tells the LLM when to use this tool. Be specific about the triggers.
+- **parameters** - A JSON schema defining what arguments the tool accepts
+
+Using `enum` for the page parameter constrains the LLM to only generate valid page names. This prevents unexpected values and simplifies your handler code.
+
+Now add it to the persona config:
+
+```typescript
+export const personaConfig = {
+  name: "Website Assistant",
+  avatarId: "edf6fdcb-acab-44b8-b974-ded72665ee26",
+  voiceId: "6bfbe25a-979d-40f3-a92b-5394170af54b",
+  systemPrompt: `You are a helpful assistant for our company website.
+Keep your responses brief and conversational.`,
+  llmId: "0934d97d-0c3a-4f33-91b0-5e136a0ef466",
+  tools: [navigateTool],
+};
+```
+
+## Updating the system prompt
+
+There's one more step. The LLM knows the tool exists (from the schema), but it doesn't know when to use it. You need to tell it in the system prompt.
+
+Update the system prompt to mention the tool and the available pages:
 
 ```typescript
 // src/config/persona.ts
@@ -56,6 +123,7 @@ You can navigate users to different pages when they ask to see specific content.
 Available pages: home, pricing, features, contact.
 When a user asks to see a page, use the navigate_to_page tool.
 Keep your responses brief and conversational.`,
+  llmId: "0934d97d-0c3a-4f33-91b0-5e136a0ef466",
   tools: [
     {
       type: "client",
@@ -78,14 +146,12 @@ Keep your responses brief and conversational.`,
 };
 ```
 
-The tool definition has four parts:
+The system prompt tells the LLM:
+1. That it can navigate users (capability)
+2. What pages are available (context)
+3. When to use the tool (instruction)
 
-- **type** - Must be `"client"` for tools that trigger events in your app
-- **name** - A unique identifier the LLM uses to call the tool
-- **description** - Tells the LLM when to use this tool. Be specific about the triggers.
-- **parameters** - A JSON schema defining what arguments the tool accepts
-
-Using `enum` for the page parameter constrains the LLM to only generate valid page names. This prevents unexpected values and simplifies your handler code.
+Without this, the LLM might not realize it should use the tool when a user asks "take me to pricing".
 
 ## Session token API route
 
@@ -140,16 +206,36 @@ export async function POST() {
 
 The `tools` array in `personaConfig` gets sent to Anam when creating the session. This inline approach means you don't need to pre-create tools in Anam Lab.
 
-## Building the component
+## Architecture overview
 
-Now let's build the component that handles tool events. We'll start with the imports and types.
+Here's the challenge: if you put the avatar component on each page, the session closes when users navigate because the component unmounts. We need the avatar to persist across page changes.
+
+The solution is a provider pattern:
+
+1. **AnamProvider** - A context provider at the root that manages session state
+2. **AvatarOverlay** - A fixed-position component in the layout that never unmounts
+3. **Pages** - Just content, no avatar component
+
+This way, navigation happens inside the provider's tree, so the session stays active.
+
+## Building the provider
+
+Let's create a context provider that manages the Anam session. It holds the client reference, connection state, and tool event handlers.
 
 ```typescript
-// src/components/ClientToolsPlayer.tsx
+// src/providers/AnamProvider.tsx
 
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useRef,
+  useState,
+  useCallback,
+  useEffect,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   createClient,
@@ -160,6 +246,32 @@ import type { AnamClient, ClientToolEvent } from "@anam-ai/js-sdk";
 
 type ConnectionState = "idle" | "connecting" | "connected" | "error";
 
+interface AnamContextValue {
+  connectionState: ConnectionState;
+  error: string | null;
+  lastToolCall: string | null;
+  startSession: () => Promise<void>;
+  stopSession: () => void;
+}
+
+const AnamContext = createContext<AnamContextValue | null>(null);
+
+export function useAnam() {
+  const context = useContext(AnamContext);
+  if (!context) {
+    throw new Error("useAnam must be used within an AnamProvider");
+  }
+  return context;
+}
+```
+
+The context exposes connection state and session controls. Any component in the tree can use `useAnam()` to check if the avatar is connected or to start/stop sessions.
+
+### Page validation
+
+We need a whitelist to validate navigation targets:
+
+```typescript
 const VALID_PAGES = ["home", "pricing", "features", "contact"] as const;
 type ValidPage = (typeof VALID_PAGES)[number];
 
@@ -168,11 +280,7 @@ function isValidPage(page: string): page is ValidPage {
 }
 ```
 
-We import `ClientToolEvent` from the SDK. This type has `eventName` (the tool name) and `eventData` (the parameters the LLM generated). The `VALID_PAGES` array matches our tool's enum and serves as a whitelist for validation.
-
-### Helper functions
-
-We need a function to fetch session tokens and one to set up event listeners.
+### Session token fetcher
 
 ```typescript
 async function fetchSessionToken(): Promise<string> {
@@ -184,69 +292,16 @@ async function fetchSessionToken(): Promise<string> {
   const { sessionToken } = await response.json();
   return sessionToken;
 }
+```
 
-function setupEventListeners(
-  client: AnamClient,
-  handlers: {
-    onConnected: () => void;
-    onDisconnected: () => void;
-    onError: (message: string) => void;
-    onToolEvent: (event: ClientToolEvent) => void;
-  }
-) {
-  client.addListener(AnamEvent.CONNECTION_ESTABLISHED, handlers.onConnected);
+### The provider component
 
-  client.addListener(AnamEvent.CLIENT_TOOL_EVENT_RECEIVED, handlers.onToolEvent);
-
-  client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
-    if (reason !== ConnectionClosedCode.NORMAL) {
-      handlers.onError(details || `Connection closed: ${reason}`);
-    } else {
-      handlers.onDisconnected();
-    }
-  });
+```typescript
+interface AnamProviderProps {
+  children: ReactNode;
 }
-```
 
-The `CLIENT_TOOL_EVENT_RECEIVED` event fires whenever the LLM calls a client tool. The event includes the tool name and the arguments it generated.
-
-### Handling tool events
-
-The tool event handler validates the page parameter and navigates using Next.js router.
-
-```typescript
-const handleToolEvent = useCallback(
-  (event: ClientToolEvent) => {
-    const { eventName, eventData } = event;
-
-    if (eventName === "navigate_to_page") {
-      const page = eventData.page as string;
-
-      // Validate against whitelist
-      if (!isValidPage(page)) {
-        console.error("Invalid page:", page);
-        return;
-      }
-
-      setLastToolCall(`Navigating to ${page}...`);
-
-      // Navigate after a brief delay so the user sees the feedback
-      setTimeout(() => {
-        const path = page === "home" ? "/" : `/${page}`;
-        router.push(path);
-      }, 500);
-    }
-  },
-  [router]
-);
-```
-
-Always validate tool parameters against a whitelist. Even with `enum` constraints, it's good practice to verify values on the client side before acting on them.
-
-### Component state and session management
-
-```typescript
-export function ClientToolsPlayer() {
+export function AnamProvider({ children }: AnamProviderProps) {
   const router = useRouter();
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("idle");
@@ -254,8 +309,38 @@ export function ClientToolsPlayer() {
   const [lastToolCall, setLastToolCall] = useState<string | null>(null);
   const clientRef = useRef<AnamClient | null>(null);
 
-  // ... handleToolEvent defined above ...
+  const handleToolEvent = useCallback(
+    (event: ClientToolEvent) => {
+      const { eventName, eventData } = event;
 
+      if (eventName === "navigate_to_page") {
+        const page = eventData.page as string;
+
+        if (!isValidPage(page)) {
+          console.error("Invalid page:", page);
+          return;
+        }
+
+        setLastToolCall(`Navigating to ${page}...`);
+
+        // Navigate after a brief delay so the user sees the feedback
+        setTimeout(() => {
+          const path = page === "home" ? "/" : `/${page}`;
+          router.push(path);
+          // Clear the tool call message after navigation
+          setTimeout(() => setLastToolCall(null), 1000);
+        }, 500);
+      }
+    },
+    [router]
+  );
+```
+
+The tool event handler validates the page against our whitelist, shows feedback, then navigates using Next.js router. The `router.push()` happens inside the provider, so the session stays alive.
+
+### Session management
+
+```typescript
   const startSession = useCallback(async () => {
     setConnectionState("connecting");
     setError(null);
@@ -266,14 +351,22 @@ export function ClientToolsPlayer() {
       const client = createClient(sessionToken);
       clientRef.current = client;
 
-      setupEventListeners(client, {
-        onConnected: () => setConnectionState("connected"),
-        onDisconnected: () => setConnectionState("idle"),
-        onError: (message) => {
-          setError(message);
+      client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () => {
+        setConnectionState("connected");
+      });
+
+      client.addListener(
+        AnamEvent.CLIENT_TOOL_EVENT_RECEIVED,
+        handleToolEvent
+      );
+
+      client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
+        if (reason !== ConnectionClosedCode.NORMAL) {
+          setError(details || `Connection closed: ${reason}`);
           setConnectionState("error");
-        },
-        onToolEvent: handleToolEvent,
+        } else {
+          setConnectionState("idle");
+        }
       });
 
       await client.streamToVideoElement("avatar-video");
@@ -292,6 +385,7 @@ export function ClientToolsPlayer() {
     setLastToolCall(null);
   }, []);
 
+  // Cleanup on unmount (only when the entire app unmounts, not on navigation)
   useEffect(() => {
     return () => {
       if (clientRef.current) {
@@ -299,88 +393,160 @@ export function ClientToolsPlayer() {
       }
     };
   }, []);
+
+  return (
+    <AnamContext.Provider
+      value={{
+        connectionState,
+        error,
+        lastToolCall,
+        startSession,
+        stopSession,
+      }}
+    >
+      {children}
+    </AnamContext.Provider>
+  );
+}
 ```
 
-We track `lastToolCall` to show feedback when the avatar triggers navigation. This gives users visual confirmation that their voice command was understood.
+The cleanup effect only runs when the provider unmounts, which happens when the entire app closes, not during page navigation.
 
-### Rendering
+## Building the avatar overlay
+
+The overlay is a fixed-position component that stays visible as users navigate. It consumes the context to display connection state and controls.
 
 ```typescript
+// src/components/AvatarOverlay.tsx
+
+"use client";
+
+import { useAnam } from "@/providers/AnamProvider";
+
+export function AvatarOverlay() {
+  const { connectionState, error, lastToolCall, startSession, stopSession } =
+    useAnam();
+
   return (
-    <div className="flex flex-col gap-4 w-full max-w-md">
-      <div className="relative aspect-[3/2] bg-black rounded-lg overflow-hidden">
-        <video
-          id="avatar-video"
-          autoPlay
-          playsInline
-          className="w-full h-full object-cover"
-        />
-
-        {connectionState === "idle" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-            <button
-              onClick={startSession}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-            >
-              Start conversation
-            </button>
-          </div>
-        )}
-
-        {connectionState === "connecting" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-            <div className="text-white">Connecting...</div>
-          </div>
-        )}
-
-        {connectionState === "error" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 gap-4">
-            <div className="text-red-400">{error}</div>
-            <button
-              onClick={startSession}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Try again
-            </button>
-          </div>
-        )}
-
-        {connectionState === "connected" && (
-          <button
-            onClick={stopSession}
-            className="absolute top-4 right-4 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
-          >
-            End session
-          </button>
-        )}
-      </div>
-
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end">
+      {/* Tool call feedback */}
       {lastToolCall && (
-        <div className="px-4 py-2 bg-green-100 text-green-800 rounded-lg text-sm">
+        <div className="px-4 py-2 bg-green-100 text-green-800 rounded-lg text-sm shadow-lg">
           {lastToolCall}
         </div>
       )}
 
-      {connectionState === "connected" && (
-        <p className="text-gray-600 text-sm text-center">
-          Try saying &quot;Show me the pricing page&quot; or &quot;Take me to
-          features&quot;
-        </p>
-      )}
+      {/* Avatar container */}
+      <div className="w-80 bg-black rounded-lg overflow-hidden shadow-xl">
+        <div className="relative aspect-[3/2]">
+          <video
+            id="avatar-video"
+            autoPlay
+            playsInline
+            className="w-full h-full object-cover"
+          />
+
+          {connectionState === "idle" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+              <button
+                onClick={startSession}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              >
+                Start conversation
+              </button>
+            </div>
+          )}
+
+          {connectionState === "connecting" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+              <div className="text-white">Connecting...</div>
+            </div>
+          )}
+
+          {connectionState === "error" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 gap-4 p-4">
+              <div className="text-red-400 text-sm text-center">{error}</div>
+              <button
+                onClick={startSession}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {connectionState === "connected" && (
+            <button
+              onClick={stopSession}
+              className="absolute top-2 right-2 px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+            >
+              End
+            </button>
+          )}
+        </div>
+
+        {connectionState === "connected" && (
+          <p className="text-gray-400 text-xs text-center py-2 px-4">
+            Try: &quot;Show me the pricing page&quot;
+          </p>
+        )}
+      </div>
     </div>
   );
 }
 ```
 
+The overlay renders different states:
+- **idle** - Shows a button to start the conversation
+- **connecting** - Shows a loading indicator
+- **connected** - Shows the avatar video with an end button
+- **error** - Shows the error message with a retry button
+
+## Wiring up the layout
+
+The layout wraps the entire app with the provider and includes the overlay.
+
+```typescript
+// src/app/layout.tsx
+
+import type { Metadata } from "next";
+import "./globals.css";
+import { AnamProvider } from "@/providers/AnamProvider";
+import { AvatarOverlay } from "@/components/AvatarOverlay";
+
+export const metadata: Metadata = {
+  title: "Client Tools Demo",
+  description: "Demonstrate client-side tools with Anam avatars",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body className="bg-gray-100 min-h-screen">
+        <AnamProvider>
+          {children}
+          <AvatarOverlay />
+        </AnamProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+The `AvatarOverlay` sits outside `{children}`, so it never unmounts during navigation. When users click links or the avatar navigates them, only the page content changes.
+
 ## Creating the pages
 
-Create pages for the avatar to navigate to. Each page includes the avatar component so users can continue the conversation after navigating.
+Now the pages are simple. They just contain content, no avatar logic.
 
 ```typescript
 // src/app/page.tsx
 
 import Link from "next/link";
-import { ClientToolsPlayer } from "@/components/ClientToolsPlayer";
 
 export default function Home() {
   return (
@@ -401,19 +567,19 @@ export default function Home() {
           </Link>
         </nav>
 
-        <div className="flex flex-col lg:flex-row gap-8 items-start">
-          <div className="flex-1 space-y-4">
-            <h1 className="text-3xl font-bold text-gray-900">
-              Welcome to Our Site
-            </h1>
-            <p className="text-gray-600">
-              This demo shows how Anam avatars can control your application
-              using client-side tools. The avatar can navigate between pages
-              based on voice commands.
-            </p>
-          </div>
-
-          <ClientToolsPlayer />
+        <div className="space-y-4">
+          <h1 className="text-3xl font-bold text-gray-900">
+            Welcome to Our Site
+          </h1>
+          <p className="text-gray-600">
+            This demo shows how Anam avatars can control your application using
+            client-side tools. The avatar can navigate between pages based on
+            voice commands.
+          </p>
+          <p className="text-gray-600">
+            Ask the avatar to show you the pricing page, features, or contact
+            information. The avatar stays active as you navigate between pages.
+          </p>
         </div>
       </div>
     </main>
@@ -429,7 +595,7 @@ Create similar pages for `/pricing`, `/features`, and `/contact`. The example re
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), start a conversation, and try saying "Show me the pricing page" or "Take me to features". The avatar will respond and navigate you to the requested page.
+Open [http://localhost:3000](http://localhost:3000), start a conversation, and try saying "Show me the pricing page" or "Take me to features". The avatar will respond and navigate you to the requested page. Notice that the session stays active as you move between pages.
 
 ## Writing good tool descriptions
 
@@ -441,35 +607,4 @@ description: "Navigate to a page"
 
 // Specific triggers - LLM understands when to call it
 description: "Navigate to a specific page when the user asks to see pricing, features, contact information, or wants to go to a different section of the site."
-```
-
-## Security considerations
-
-**Validate all parameters** against a whitelist, even when using `enum` constraints:
-
-```typescript
-const VALID_PAGES = ["home", "pricing", "features", "contact"] as const;
-
-if (!VALID_PAGES.includes(page)) {
-  console.error("Invalid page:", page);
-  return;
-}
-```
-
-**Don't expose sensitive data** in tool parameters. Use IDs and fetch sensitive data server-side:
-
-```typescript
-// Bad - exposes sensitive data
-parameters: {
-  properties: {
-    cardNumber: { type: "string" }  // Never do this
-  }
-}
-
-// Good - use references
-parameters: {
-  properties: {
-    paymentMethodId: { type: "string" }  // Fetch details server-side
-  }
-}
 ```

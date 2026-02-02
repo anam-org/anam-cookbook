@@ -41,8 +41,8 @@ export const topics: TopicConfig[] = [
     gradient: 'linear-gradient(135deg, #F0EBF8 0%, #C4B0E8 50%, #8B6FCF 100%)',
   },
   {
-    name: 'Anam Lab',
-    slug: 'anam-lab',
+    name: 'ElevenLabs',
+    slug: 'elevenlabs',
     // Rose palette: dusty rose → blush pink (reversed)
     gradient: 'linear-gradient(135deg, #D4728A 0%, #E8B4C0 50%, #F9ECE4 100%)',
   },
@@ -52,7 +52,7 @@ export const topics: TopicConfig[] = [
 // Order matters - first items appear first
 export const featuredRecipeSlugs: string[] = [
   'basic-nextjs-app',
-  'getting-started-with-livekit',
+  'gemini-vision-with-anam-livekit',
   'elevenlabs-conversational-agents',
   'client-side-tools',
   'custom-llm-client-side',
