@@ -41,7 +41,7 @@ export default function RootLayout({
   const recipes = getAllRecipes();
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -52,11 +52,12 @@ export default function RootLayout({
                   document.documentElement.classList.add('theme-transitioning');
 
                   const theme = localStorage.getItem('theme');
-                  if (theme === 'dark') {
+                  if (theme === 'light') {
+                    document.documentElement.classList.remove('dark');
+                    document.documentElement.style.colorScheme = 'light';
+                  } else {
                     document.documentElement.classList.add('dark');
                     document.documentElement.style.colorScheme = 'dark';
-                  } else {
-                    document.documentElement.style.colorScheme = 'light';
                   }
 
                   // Re-enable transitions after initial render
@@ -72,19 +73,19 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               html {
-                background-color: #F5F5F5;
-                color-scheme: light;
-              }
-              html.dark {
                 background-color: #202122;
                 color-scheme: dark;
+              }
+              html:not(.dark) {
+                background-color: #F5F5F5;
+                color-scheme: light;
               }
             `,
           }}
         />
       </head>
       <body className={`${inter.className} min-h-screen flex flex-col`}>
-        <ThemeProvider defaultTheme="light">
+        <ThemeProvider defaultTheme="dark">
           <Header recipes={recipes} />
           <main className="flex-1">{children}</main>
           <Footer />
