@@ -2,7 +2,7 @@
 
 Example code and guides for building conversational AI experiences with [Anam](https://anam.ai) avatars.
 
-Browse the cookbook at **[cookbook.anam.ai](https://cookbook.anam.ai)** or read the guides below.
+Browse the cookbook at **[anam.ai/cookbook](https://anam.ai/cookbook)** or read the guides below.
 
 ## Getting started
 
