@@ -11,11 +11,11 @@ const inter = Inter({ subsets: ['latin'] });
 export const metadata: Metadata = {
   title: 'Anam Cookbook',
   description: 'Cookbooks and examples for building with Anam AI avatars',
-  metadataBase: new URL('https://cookbook.anam.ai'),
+  metadataBase: new URL('https://anam.ai/cookbook'),
   openGraph: {
     title: 'Anam Cookbook',
     description: 'Cookbooks and examples for building with Anam AI avatars',
-    url: 'https://cookbook.anam.ai',
+    url: 'https://anam.ai/cookbook',
     siteName: 'Anam Cookbook',
     type: 'website',
   },

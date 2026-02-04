@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: TopicPageProps) {
 
   const title = `${topic.name} - Anam Cookbook`;
   const description = `Explore ${topic.name.toLowerCase()} cookbooks and tutorials for building with Anam AI avatars.`;
-  const url = `https://cookbook.anam.ai/topic/${slug}`;
+  const url = `https://anam.ai/cookbook/topic/${slug}`;
 
   return {
     title,
