@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: RecipePageProps) {
 
   const title = `${recipe.frontmatter.title} | Anam Cookbook`;
   const description = recipe.frontmatter.description || 'A guide from the Anam Cookbook';
-  const url = `https://cookbook.anam.ai/${slug}`;
+  const url = `https://anam.ai/cookbook/${slug}`;
 
   return {
     title,
