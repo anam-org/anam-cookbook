@@ -1,0 +1,524 @@
+---
+title: Expressive Voice Agents with ElevenLabs and Anam Avatars
+description: Build a Next.js app where ElevenLabs handles voice intelligence and Anam renders a real-time lip-synced avatar, with streaming transcripts and interruption support.
+tags: [agents, javascript, nextjs, elevenlabs]
+difficulty: 'intermediate'
+sdk: 'javascript'
+date: 2026-02-17
+authors: [robbie-anam]
+---
+
+## Overview
+
+ElevenLabs' Conversational AI handles voice intelligence — speech recognition, LLM reasoning, and text-to-speech with expressive intonation. Anam renders a real-time lip-synced avatar from that audio. This cookbook shows how to bridge the two SDKs in a Next.js app so users talk to a face, not a loading spinner.
+
+The full source code is available on [GitHub](https://github.com/robbie-anam/elevenlabs-agent).
+
+## What You'll Build
+
+- A Next.js app where users speak into their mic and get a face-to-face response from an AI agent
+- ElevenLabs handles the full voice pipeline (STT → LLM → TTS) with expressive V3 voices
+- Anam renders a real-time lip-synced avatar from the generated audio
+- A streaming transcript that reveals text character-by-character in sync with the avatar's mouth
+- Interruption support — speak while the agent is talking and the avatar stops mid-sentence
+- Multiple persona presets — switch between different avatar + agent combinations
+
+## How the Two SDKs Work Together
+
+The ElevenLabs SDK captures microphone audio and sends it over a WebSocket. ElevenLabs' cloud runs speech-to-text, passes the transcript to an LLM, and streams synthesized speech back as base64 PCM chunks. Those chunks are forwarded to Anam's `sendAudioChunk()` method, which generates a lip-synced face video delivered over WebRTC.
+
+```
+        User speaks
+            ↓
+        ElevenLabs SDK (mic capture)
+            ↓
+        WebSocket → ElevenLabs Cloud
+            ↓
+        STT → LLM → TTS
+
+        base64 PCM chunks
+            ↓
+        onAudio callback
+            ↓
+        sendAudioChunk()
+
+        Anam WebRTC
+            ↓
+        <video>
+```
+
+The ElevenLabs SDK's built-in speaker is muted (volume set to 0) so the user only hears audio through the avatar's WebRTC stream. This avoids double playback.
+
+<Warning>
+Use WebSocket, not WebRTC, for the ElevenLabs connection. WebRTC delivers audio at 1x realtime — Anam needs chunks faster than that so it has headroom to render the face. WebSocket sends as fast as the network allows.
+
+Signed URLs (used in this example) default to WebSocket.
+</Warning>
+
+## Prerequisites
+
+- Node.js 18+
+- An [Anam](https://anam.ai) account and API key (sign up free at [lab.anam.ai](https://lab.anam.ai))
+- An [ElevenLabs](https://elevenlabs.io) account and API key
+- An ElevenLabs Conversational Agent configured with a V3 voice and `pcm_16000` output format
+
+## Project Setup
+
+### Clone and install
+
+```bash
+git clone https://github.com/robbie-anam/elevenlabs-agent
+cd elevenlabs-agent
+npm install
+```
+
+### Configure your ElevenLabs Agent
+
+Before setting up the app, create an agent in ElevenLabs:
+
+1. Go to [elevenlabs.io](https://elevenlabs.io) → **Agents** → **Create Agent**
+2. Configure the agent's system prompt and personality
+3. Under **Agent Voice**, select **V3 Conversational** as the TTS model — this enables expressive mode
+4. Under **Advanced** settings, set the output audio format to `pcm_16000`
+5. Copy the **Agent ID**
+
+<Warning>
+The `pcm_16000` format is required. Anam's audio passthrough expects raw PCM at 16 kHz. Other formats (mp3, opus) won't work.
+</Warning>
+
+### Environment variables
+
+```bash
+cp .env.local.example .env.local
+```
+
+Fill in the values:
+
+| Variable | Source |
+|---|---|
+| `ANAM_API_KEY` | lab.anam.ai → API Keys |
+| `ELEVENLABS_API_KEY` | elevenlabs.io → API Keys |
+| `PERSONA_1_NAME` | Display label shown in the UI (defaults to "Persona 1") |
+| `PERSONA_1_AVATAR_ID` | lab.anam.ai → Avatars |
+| `PERSONA_1_AGENT_ID` | ElevenLabs Agents dashboard |
+
+You can configure up to three persona presets (name + avatar + agent). Each appears as a selector button in the UI. Only the first is required — the name defaults to "Persona 1", "Persona 2", etc. if not set.
+
+### Start the dev server
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000), click **Start**, grant microphone permission, and speak.
+
+## Project Structure
+
+```
+elevenlabs-agent/
+├── src/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── anam-session/route.ts       # Anam session token endpoint
+│   │   │   └── elevenlabs-signed-url/route.ts  # ElevenLabs signed URL endpoint
+│   │   ├── layout.tsx                      # Root layout
+│   │   ├── page.tsx                        # Home page with persona presets
+│   │   └── globals.css
+│   ├── components/
+│   │   └── ConversationView.tsx            # Main orchestrator component
+│   └── hooks/
+│       └── useStreamingTranscript.ts       # Character-by-character transcript
+├── .env.local.example
+├── package.json
+└── next.config.ts
+```
+
+## Server-Side: Session Token Routes
+
+Both Anam and ElevenLabs require short-lived tokens created server-side to keep API keys out of the browser.
+
+### Anam session token
+
+This route creates a session token configured for audio passthrough — Anam will render an avatar face from audio you send, rather than running its own STT/LLM/TTS pipeline.
+
+```typescript
+// src/app/api/anam-session/route.ts
+import { NextResponse } from "next/server";
+
+export async function POST(request: Request) {
+  const apiKey = process.env.ANAM_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "ANAM_API_KEY must be set" },
+      { status: 500 }
+    );
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const avatarId = body.avatarId;
+
+  if (!avatarId) {
+    return NextResponse.json(
+      { error: "avatarId is required" },
+      { status: 400 }
+    );
+  }
+
+  const res = await fetch("https://api.anam.ai/v1/auth/session-token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      personaConfig: {
+        avatarId,
+        enableAudioPassthrough: true,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    return NextResponse.json(
+      { error: `Anam API error: ${res.status} ${text}` },
+      { status: res.status }
+    );
+  }
+
+  const data = await res.json();
+  return NextResponse.json({ sessionToken: data.sessionToken });
+}
+```
+
+<Info>
+`enableAudioPassthrough: true` is the key setting. It tells Anam to skip STT/LLM/TTS and only render a face from audio you provide via `sendAudioChunk()`.
+</Info>
+
+### ElevenLabs signed URL
+
+This route gets a signed WebSocket URL for the ElevenLabs Conversational AI agent. The signed URL lets the browser connect directly to ElevenLabs without exposing the API key.
+
+```typescript
+// src/app/api/elevenlabs-signed-url/route.ts
+import { NextResponse } from "next/server";
+
+export async function POST(request: Request) {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "ELEVENLABS_API_KEY must be set" },
+      { status: 500 }
+    );
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const agentId = body.agentId;
+
+  if (!agentId) {
+    return NextResponse.json(
+      { error: "agentId is required" },
+      { status: 400 }
+    );
+  }
+
+  const res = await fetch(
+    `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
+    {
+      headers: { "xi-api-key": apiKey },
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    return NextResponse.json(
+      { error: `ElevenLabs API error: ${res.status} ${text}` },
+      { status: res.status }
+    );
+  }
+
+  const data = await res.json();
+  return NextResponse.json({ signedUrl: data.signed_url });
+}
+```
+
+## Client-Side: Bridging the SDKs
+
+The `ConversationView` component is the orchestrator. It initializes both SDKs, wires the audio bridge, and manages connection lifecycle.
+
+### Fetching tokens and initializing Anam
+
+When the user clicks Start, both tokens are fetched in parallel. The Anam client is created with `disableInputAudio: true` since ElevenLabs handles microphone capture.
+
+```typescript
+// Fetch tokens in parallel
+const [anamRes, elRes] = await Promise.all([
+  fetch("/api/anam-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ avatarId }),
+  }),
+  fetch("/api/elevenlabs-signed-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agentId }),
+  }),
+]);
+
+const { sessionToken } = await anamRes.json();
+const { signedUrl } = await elRes.json();
+```
+
+```typescript
+// Initialize Anam — disable its mic capture since ElevenLabs owns the mic
+const anamClient = createClient(sessionToken, {
+  disableInputAudio: true,
+});
+
+await anamClient.streamToVideoElement("avatar-video");
+```
+
+### Setting up the audio input stream
+
+The audio input stream tells Anam what format to expect from the incoming audio chunks. This must match the ElevenLabs agent's output format: PCM 16-bit, 16 kHz, mono.
+
+```typescript
+const audioInputStream = anamClient.createAgentAudioInputStream({
+  encoding: "pcm_s16le",
+  sampleRate: 16000,
+  channels: 1,
+});
+```
+
+### Connecting to ElevenLabs and bridging audio
+
+The `Conversation.startSession` call opens a WebSocket to ElevenLabs. The `onAudio` callback fires for every chunk of synthesized speech — this is where the bridge happens. Each chunk is forwarded to Anam's `sendAudioChunk()`.
+
+```typescript
+const conversation = await Conversation.startSession({
+  signedUrl,
+
+  onAudio: (base64Audio: string) => {
+    transcript.handleAudioChunk(base64Audio);
+
+    if (anamReadyRef.current) {
+      audioInputStreamRef.current?.sendAudioChunk(base64Audio);
+    } else {
+      audioBufferRef.current.push(base64Audio);
+    }
+  },
+
+  onMessage: ({ role, message }: { role: string; message: string }) => {
+    if (role === "user") {
+      transcript.addUserMessage(message);
+    } else {
+      transcript.handleAgentMessage(message);
+    }
+  },
+
+  onModeChange: ({ mode }: { mode: string }) => {
+    if (mode === "listening") {
+      audioInputStreamRef.current?.endSequence();
+      transcript.handleAgentDone();
+    }
+  },
+
+  onDisconnect: () => {
+    transcript.cleanup();
+    setStatus("idle");
+  },
+
+  onError: (message: string) => {
+    console.error("ElevenLabs error:", message);
+    transcript.cleanup();
+    setError(message);
+    setStatus("error");
+  },
+});
+
+// Mute ElevenLabs speaker — audio plays through Anam's WebRTC stream
+conversation.setVolume({ volume: 0 });
+```
+
+A few things to note:
+
+<Tip>
+Audio chunks can arrive from ElevenLabs before Anam's WebRTC connection is ready. The code buffers these chunks and flushes them once the `SESSION_READY` event fires — see the next section for details.
+</Tip>
+
+- **`endSequence()`** is called when ElevenLabs switches to `listening` mode, signaling the end of the agent's speech turn. This tells Anam to finish rendering and prepare for the next turn.
+- **`setVolume({ volume: 0 })`** prevents double audio. Without this, you'd hear the agent through both ElevenLabs' speaker and the avatar's WebRTC stream.
+
+### Handling Anam readiness
+
+Audio chunks can arrive from ElevenLabs before Anam's WebRTC connection is ready. Buffer them and flush on `SESSION_READY`:
+
+```typescript
+anamClient.addListener(AnamEvent.SESSION_READY, () => {
+  for (const chunk of audioBufferRef.current) {
+    audioInputStreamRef.current?.sendAudioChunk(chunk);
+  }
+  audioBufferRef.current = [];
+  anamReadyRef.current = true;
+});
+```
+
+## Streaming Transcript
+
+The app reveals agent text character-by-character in sync with the avatar's mouth movements. This involves three pieces of data from the ElevenLabs SDK:
+
+1. **`onAudioAlignment`** — per-character timing data (character, start time, duration) for each audio chunk
+2. **`onAudio`** — the raw audio chunk itself, used to track cumulative audio duration
+3. **`onMessage`** — the complete agent message text (ground truth from the LLM)
+
+### Timing model
+
+Each character is scheduled to appear at:
+
+```
+speechStartTime + cumulativeAudioOffset + charStartTime + RENDER_DELAY_MS
+```
+
+- **`speechStartTime`**: wall-clock timestamp captured when the first alignment of the current speech turn arrives
+- **`cumulativeAudioOffset`**: total duration of PCM audio received before this chunk, positioning each alignment block relative to the start of speech
+- **`charStartTime`**: per-character offset within an alignment block, provided by ElevenLabs
+- **`RENDER_DELAY_MS`**: fixed 500ms offset to compensate for Anam's face rendering pipeline, so text appears when the avatar mouths the word — not before
+
+### Scheduling character reveals
+
+The `handleAlignment` callback fires for each alignment block. It schedules a `setTimeout` for every character:
+
+```typescript
+const RENDER_DELAY_MS = 500;
+
+const handleAlignment = useCallback(
+  ({
+    chars,
+    char_start_times_ms,
+  }: {
+    chars: string[];
+    char_start_times_ms: number[];
+    char_durations_ms: number[];
+  }) => {
+    if (speechStartTimeRef.current === 0) {
+      speechStartTimeRef.current = Date.now();
+    }
+
+    const baseTime = speechStartTimeRef.current;
+    const audioOffset = cumulativeAudioMsRef.current;
+    const now = Date.now();
+    const startIndex = alignedCharCountRef.current;
+
+    for (let i = 0; i < chars.length; i++) {
+      fullAgentTextRef.current += chars[i];
+      const charIndex = startIndex + i;
+
+      const revealAt =
+        baseTime + audioOffset + char_start_times_ms[i] + RENDER_DELAY_MS;
+      const delay = Math.max(0, revealAt - now);
+
+      const timer = setTimeout(() => {
+        if (charIndex + 1 > revealedIndexRef.current) {
+          revealedIndexRef.current = charIndex + 1;
+          scheduleTextUpdate();
+        }
+      }, delay);
+      pendingTimersRef.current.push(timer);
+    }
+
+    alignedCharCountRef.current += chars.length;
+  },
+  [scheduleTextUpdate]
+);
+```
+
+Text is revealed using index-based slicing (`source.slice(0, revealedIndex)`) rather than string concatenation. A monotonically increasing revealed index means out-of-order timers are harmless — they can only move the index forward. DOM updates are batched via `requestAnimationFrame` to avoid excessive re-renders.
+
+### Why two text sources?
+
+The ElevenLabs SDK provides text through two channels that can differ:
+
+- **Alignment characters** (`onAudioAlignment`): TTS-normalized text. Numbers might be spelled out, abbreviations expanded.
+- **Message text** (`onMessage`): the original LLM output — the ground truth.
+
+The hook prefers `onMessage` text when available, but uses alignment characters for pacing. When the speech turn ends, the full `onMessage` text is shown regardless of how far the alignment timers got.
+
+<Tip>
+A future version of Anam's audio passthrough mode will support passing transcript data inline with the video stream, removing the need for this client-side timing logic. The approach above works today and will continue to work, but keep an eye on the [Anam docs](https://docs.anam.ai) for a simpler path.
+</Tip>
+
+## Handling Interruptions
+
+When a user speaks while the agent is talking, ElevenLabs stops generating audio and the avatar needs to stop too. The app listens for Anam's `TALK_STREAM_INTERRUPTED` event:
+
+```typescript
+anamClient.addListener(
+  AnamEvent.TALK_STREAM_INTERRUPTED,
+  transcript.handleInterrupt
+);
+```
+
+The interrupt handler cancels all pending character timers, captures whatever text has been revealed so far, marks the message as interrupted, and resets streaming state for the next turn:
+
+```typescript
+const handleInterrupt = useCallback(() => {
+  clearPendingTimers();
+  const partialText = getDisplayText();
+  resetStreamingState();
+
+  setMessages((prev) => {
+    const last = prev[prev.length - 1];
+    if (last?.role === "agent") {
+      const updated = [...prev];
+      updated[updated.length - 1] = {
+        ...last,
+        text: partialText || last.text,
+        interrupted: true,
+      };
+      return updated;
+    }
+    return prev;
+  });
+}, [clearPendingTimers, getDisplayText, resetStreamingState]);
+```
+
+Interrupted messages render with an `[interrupted]` tag so the user can see where the agent was cut off.
+
+## Troubleshooting
+
+**No audio from the avatar / lips not moving**
+- Confirm the ElevenLabs agent output format is `pcm_16000`. Other formats (mp3, opus, different sample rates) are not compatible with Anam's audio passthrough.
+- Check the browser console for errors from the Anam session token route.
+
+**Double audio (hearing speech twice)**
+- Make sure `conversation.setVolume({ volume: 0 })` is called after `startSession`. If the ElevenLabs speaker is not muted, audio plays from both ElevenLabs and the avatar.
+
+**Avatar video connects but no face appears**
+- Audio chunks may arrive before Anam's WebRTC connection is ready. The buffering logic in `SESSION_READY` handles this, but check that the listener is registered before calling `streamToVideoElement`.
+
+**Transcript text appears before the avatar speaks**
+- Adjust `RENDER_DELAY_MS` in `useStreamingTranscript.ts`. The default 500ms works for most setups, but higher latency connections may need a larger value.
+
+**"Failed to get Anam session token" error**
+- Verify `ANAM_API_KEY` is set in `.env.local` and the key is active in [lab.anam.ai](https://lab.anam.ai).
+- Confirm the `avatarId` in your environment variables matches an avatar available to your account.
+
+**"Failed to get ElevenLabs signed URL" error**
+- Verify `ELEVENLABS_API_KEY` is set in `.env.local`.
+- Confirm the `agentId` matches an agent in your ElevenLabs dashboard.
+
+## Deployment
+
+### Vercel
+
+1. Push the repo to GitHub
+2. Import the project in [Vercel](https://vercel.com)
+3. Add the environment variables (`ANAM_API_KEY`, `ELEVENLABS_API_KEY`, and the persona variables) in the Vercel dashboard
+4. Deploy
+
+The app uses Next.js API routes for token creation, which run as serverless functions on Vercel with no extra configuration.
+
+### Other platforms
+
+The only server-side requirement is two API routes that proxy token requests. Any platform that supports Next.js (or a comparable server runtime) works. Make sure API keys are set as environment variables and not bundled into the client build.

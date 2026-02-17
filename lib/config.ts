@@ -53,7 +53,7 @@ export const topics: TopicConfig[] = [
 export const featuredRecipeSlugs: string[] = [
   'basic-nextjs-app',
   'gemini-vision-with-anam-livekit',
-  'elevenlabs-conversational-agents',
+  'elevenlabs-expressive-voice-agents',
   'client-side-tools',
   'custom-llm-client-side',
   'rag-knowledge-base',
