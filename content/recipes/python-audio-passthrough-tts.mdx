@@ -15,11 +15,12 @@ The complete code is at [examples/python-audio-passthrough-tts](https://github.c
 
 A Python script that:
 
-- Accepts `--text` (ElevenLabs TTS) as input
+- Accepts `--text` as input and converts it to speech via ElevenLabs
 - Connects to Anam with audio passthrough
-- Receives synchronised audio and video frames from the backend
-- Displays the avatar video in an OpenCV window
 - Sends the audio to the avatar, waits in listening mode for 5 seconds and exits when done
+- Receives synchronised audio and video frames from the backend
+- Displays the avatar video in an OpenCV window and plays the audio through sounddevice
+
 
 ## Prerequisites
 
@@ -128,7 +129,7 @@ pcm_bytes = b"".join(response)
 
 <Tip>
 Anam supports any sample rate between 16000 and 48000 Hz. However, for best performance, we suggest using 24000 Hz as this balances latency and audio quality.
-Anam does not resample the TTS audio internally, so the quality you provide is the quality that will be delibered. Note that for webRTC delivery, the audio is converted to 48000 Hz (stereo) and compressed with OPUS.
+Anam does not resample the TTS audio internally, so the quality you provide is the quality that will be delivered. Note that for webRTC delivery, the audio is converted to 48000 Hz (stereo) and compressed with OPUS.
 </Tip>
 
 ## Sending audio to the avatar
@@ -142,7 +143,7 @@ agent = session.create_agent_audio_input_stream(
     AgentAudioInputConfig(encoding="pcm_s16le", sample_rate=24000, channels=1)
 )
 
-chunk_size = 12000  # ~250ms
+chunk_size = 12000  # 500ms
 for i in range(0, len(pcm_bytes), chunk_size):
     chunk = pcm_bytes[i : i + chunk_size]
     if chunk:
@@ -157,7 +158,7 @@ await asyncio.sleep(duration_sec + 5.0)
 ```
 
 <Tip>
-`end_sequence()` is essential for the avatar to behave naturally at the end of it's turn and return to a neutral listening mode. When end_sequence() is not called, the pipeline assumes TTS audio is still incoming and it will stall the video generation. 
+`end_sequence()` is essential for the avatar to behave naturally at the end of its turn and return to a neutral listening mode. When end_sequence() is not called, the pipeline assumes TTS audio is still incoming and it will stall the video generation. 
 Comment out end_sequence() to see this effect in action.
 </Tip>
 
