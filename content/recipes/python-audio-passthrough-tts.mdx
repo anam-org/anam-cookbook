@@ -1,13 +1,13 @@
 ---
-title: Python audio passthrough with ElevenLabs TTS
-tags: [python, audio-passthrough, tts, elevenlabs, beginner]
+title: Python audio passthrough with custom TTS
+tags: [python, audio-passthrough, tts, avatar, webRTC, beginner]
 date: 2025-02-19
 authors: [sebvanleuven]
 ---
 
 Anam's audio passthrough mode lets you drive the avatar with your own TTS audio. Instead of using Anam's orchestration layer (STT/LLM/TTS pipeline), you directly send audio to generate the avatar. This is useful when you want to use a specific TTS provider, or want full control over the pipeline. 
 
-This recipe shows a script-style example: pass text on the command line, and the script connects to Anam, converts text to speech via ElevenLabs, and streams the audio to the avatar.
+This recipe shows a script-style example: pass text on the command line, and the script connects to Anam, converts text to speech via ElevenLabs, and streams the audio to the avatar. It receives synchronised audio and video frames from the backend and displays the avatar video in an OpenCV window.
 
 The complete code is at [examples/python-audio-passthrough-tts](https://github.com/anam-org/anam-cookbook/tree/main/examples/python-audio-passthrough-tts).
 
@@ -17,6 +17,7 @@ A Python script that:
 
 - Accepts `--text` (ElevenLabs TTS) as input
 - Connects to Anam with audio passthrough
+- Receives synchronised audio and video frames from the backend
 - Displays the avatar video in an OpenCV window
 - Sends the audio to the avatar, waits in listening mode for 5 seconds and exits when done
 
