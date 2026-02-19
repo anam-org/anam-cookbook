@@ -1,0 +1,15 @@
+[project]
+name = "python-audio-passthrough-tts"
+version = "0.1.0"
+description = "Python script connecting to Anam with audio passthrough: local file and TTS"
+requires-python = ">=3.10"
+dependencies = [
+    "anam>=0.3.0",
+    "elevenlabs>=1.0.0",
+    "opencv-python>=4.9.0",
+    "python-dotenv>=1.2.1",
+    "sounddevice>=0.4.6",
+]
+
+[tool.uv]
+package = false
