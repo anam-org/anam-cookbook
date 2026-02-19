@@ -1,0 +1,98 @@
+---
+title: Adding the Anam widget to WordPress
+tags: [widget, wordpress, no-code]
+date: 2026-02-19
+authors: [ao-anam]
+---
+
+# Adding the Anam widget to WordPress
+
+WordPress doesn't let you paste raw HTML into a page editor and have it execute scripts. You need a way to inject code into your site's header or footer. The easiest approach is the WPCode plugin, which gives you a UI for managing custom code snippets without touching theme files.
+
+## What you'll build
+
+A WordPress site with an Anam avatar widget that appears on every page. Visitors click the widget to start a conversation with your AI persona.
+
+## Prerequisites
+
+- An Anam account with a published persona ([lab.anam.ai](https://lab.anam.ai))
+- A WordPress site where you can install plugins (WordPress.com Personal plan or higher, or any self-hosted WordPress site)
+
+## Grab your embed code
+
+Open [Anam Lab](https://lab.anam.ai), go to your persona, and copy the widget embed snippet from the **Widget** tab:
+
+```html
+<anam-agent agent-id="your-persona-id"></anam-agent>
+<script src="https://unpkg.com/@anam-ai/agent-widget" async></script>
+```
+
+## Install WPCode
+
+From your WordPress dashboard, go to **Plugins → Add Plugin** and search for "wpcode".
+
+![WordPress plugin marketplace showing WPCode in search results](/img/wordpress-widget/finding-plugins.png)
+
+Click **Install** on **WPCode – Insert Headers and Footers + Custom Code Snippets** (it's the one by WPCode, typically the first result). Once installed, click **Activate**.
+
+You should see "WPCode Lite" show up in your installed plugins list, and a new **Code Snippets** item appear in the left sidebar.
+
+![WordPress installed plugins list showing WPCode Lite active](/img/wordpress-widget/installed-plugin-list.png)
+
+## Create a custom snippet
+
+Go to **Code Snippets → + Add Snippet**. You'll see WPCode's snippet library with a bunch of pre-made options. We don't need any of those. Click **Add Your Custom Code (New Snippet)** at the top, then click the **+ Add Custom Snippet** button.
+
+![WPCode Add Snippet page showing the custom snippet option](/img/wordpress-widget/add-custom-snippet.png)
+
+## Configure the snippet
+
+Give your snippet a title like "Anam widget" so you can find it later.
+
+Set the **Code Type** dropdown to **HTML Snippet** (not JavaScript Snippet, since our code includes both HTML tags and a script tag).
+
+Paste your embed code into the code editor:
+
+```html
+<anam-agent agent-id="your-persona-id"></anam-agent>
+<script src="https://unpkg.com/@anam-ai/agent-widget" async></script>
+```
+
+Under **Insertion**, keep the method set to **Auto Insert** and set the **Location** to **Site Wide Header**. This makes the snippet load on every page.
+
+Flip the **Active** toggle in the top right to turn it on, then click **Save Snippet**.
+
+![WPCode snippet editor with the Anam widget code, set to HTML Snippet type and Site Wide Header location](/img/wordpress-widget/adding-snippet-code.png)
+
+## Check your site
+
+Open your WordPress site in a new tab. The widget should appear on the page, positioned however you configured it in Anam Lab.
+
+![Live WordPress site showing the Anam widget](/img/wordpress-widget/result.png)
+
+The widget will appear on every page across your site.
+
+## Customizing the widget
+
+The easiest way to customize your widget is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Widget** tab to change the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
+
+If you need to override something for a specific page, you can also use HTML attributes directly. Go back to **Code Snippets**, find your "Anam widget" snippet, and edit it:
+
+```html
+<anam-agent
+  agent-id="your-persona-id"
+  initial-state="minimized"
+  call-to-action="Need help?"
+></anam-agent>
+<script src="https://unpkg.com/@anam-ai/agent-widget" async></script>
+```
+
+The full list of attributes is in the [widget documentation](https://docs.anam.ai/widget/overview).
+
+## Why WPCode instead of editing theme files?
+
+You could paste the widget code directly into your theme's `header.php` or `footer.php` files, but that approach has downsides. Theme updates can overwrite your changes, and switching themes means you lose the widget. WPCode keeps your custom code separate from the theme, so it survives updates and theme changes. It also gives you a toggle to turn snippets on and off without deleting code, which is handy for testing.
+
+## Removing the widget
+
+Go to **Code Snippets**, find your "Anam widget" snippet, and either toggle it to **Inactive** (keeps the code for later) or delete it entirely.

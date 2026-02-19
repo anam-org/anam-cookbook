@@ -23,8 +23,8 @@ export const topics: TopicConfig[] = [
     gradient: 'linear-gradient(135deg, #E8846A 0%, #F2B8A0 50%, #F9ECE4 100%)',
   },
   {
-    name: 'RAG',
-    slug: 'rag',
+    name: 'Widget',
+    slug: 'widget',
     // Green palette: mint → forest green
     gradient: 'linear-gradient(135deg, #E8F2EC 0%, #8ED4AC 50%, #3DAA7D 100%)',
   },

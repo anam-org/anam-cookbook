@@ -1,0 +1,76 @@
+---
+title: Adding the Anam widget to Squarespace
+tags: [widget, squarespace, no-code]
+date: 2026-02-19
+authors: [ao-anam]
+---
+
+# Adding the Anam widget to Squarespace
+
+The Anam widget is a drop-in web component that adds a conversational AI avatar to any website. On Squarespace, getting it running is a two-minute job. You paste two lines of HTML into the code injection panel, and your persona shows up on every page.
+
+## What you'll build
+
+A Squarespace site with an Anam avatar widget. Visitors can click it to start a conversation with your AI persona.
+
+## Prerequisites
+
+- An Anam account with a published persona ([lab.anam.ai](https://lab.anam.ai))
+- A Squarespace site on a Core plan or higher
+
+<Info>
+Code injection is not available on Squarespace's free trial. You'll need at least a Core plan.
+</Info>
+
+## Grab your embed code
+
+Head to [Anam Lab](https://lab.anam.ai) and open the persona you want to deploy. Go to the **Widget** tab and copy the embed snippet. It looks like this:
+
+```html
+<anam-agent agent-id="your-persona-id"></anam-agent>
+<script src="https://unpkg.com/@anam-ai/agent-widget" async></script>
+```
+
+## Open code injection in Squarespace
+
+From your Squarespace dashboard, click **Website** in the left sidebar to expand the menu.
+
+![Squarespace dashboard with the Website menu expanded](/img/squarespace-widget/main-sidebar.png)
+
+Now go to **Website → Pages**. At the bottom of the pages panel you'll see **Custom Code → Code Injection**.
+
+## Paste the embed code
+
+Drop your two lines into the **Header** code injection field. That's it.
+
+![Code injection panel with the Anam widget snippet pasted into the Header field](/img/squarespace-widget/adding-snippet.png)
+
+Click **Save** and you're done with the configuration.
+
+## Check it on your live site
+
+Open your live site URL and you should see the widget on the page.
+
+![The live Squarespace site showing the Anam widget](/img/squarespace-widget/result.png)
+
+
+## Customizing the widget
+
+The easiest way to customize your widget is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Widget** tab to change the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
+
+You can also override settings per-embed using HTML attributes. For example, if you want a specific page to behave differently from your Lab defaults:
+
+```html
+<anam-agent
+  agent-id="your-persona-id"
+  initial-state="minimized"
+  call-to-action="Chat with us"
+></anam-agent>
+<script src="https://unpkg.com/@anam-ai/agent-widget" async></script>
+```
+
+The full list of attributes is in the [widget documentation](https://docs.anam.ai/widget/overview).
+
+## Removing the widget
+
+To take the widget down, go back to the code injection panel and delete the two lines you added. Save, and it's gone from your site.

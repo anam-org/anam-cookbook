@@ -3,7 +3,23 @@ import { CodeBlockServer } from './CodeBlockServer';
 import { Callout } from './Callout';
 import { Steps } from './Steps';
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/cookbook';
+
 export const mdxComponents: MDXComponents = {
+  // Override img to handle basePath for local images
+  img: ({ src, alt, ...props }: React.ComponentProps<'img'>) => {
+    const resolvedSrc = src && src.startsWith('/') ? `${basePath}${src}` : src;
+    return (
+      <img
+        src={resolvedSrc}
+        alt={alt || ''}
+        loading="lazy"
+        {...props}
+        style={{ borderRadius: '8px', ...props.style }}
+      />
+    );
+  },
+
   // Override default code blocks
   pre: ({ children, ...props }: React.ComponentProps<'pre'>) => {
     // Extract code element
