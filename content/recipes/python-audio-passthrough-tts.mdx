@@ -143,7 +143,7 @@ agent = session.create_agent_audio_input_stream(
     AgentAudioInputConfig(encoding="pcm_s16le", sample_rate=24000, channels=1)
 )
 
-chunk_size = 12000  # 500ms
+chunk_size = 24000  # 500ms
 for i in range(0, len(pcm_bytes), chunk_size):
     chunk = pcm_bytes[i : i + chunk_size]
     if chunk:

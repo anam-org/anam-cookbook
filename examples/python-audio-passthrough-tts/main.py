@@ -110,7 +110,7 @@ def get_pcm_from_elevenlabs(text: str, voice_id: str, api_key: str) -> bytes:
     return b"".join(response)
 
 
-async def send_pcm_to_agent(agent, pcm_bytes: bytes, chunk_size: int = 12000) -> None:
+async def send_pcm_to_agent(agent, pcm_bytes: bytes, chunk_size: int = 24000) -> None:
     """Send PCM bytes to agent in chunks."""
     for i in range(0, len(pcm_bytes), chunk_size):
         chunk = pcm_bytes[i : i + chunk_size]
