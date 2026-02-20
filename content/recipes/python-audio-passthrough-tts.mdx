@@ -116,7 +116,7 @@ After the webRTC session is connected, we'll wait until session_ready is set bef
 try:
     await asyncio.wait_for(session_ready.wait(), timeout=30.0)
 except asyncio.TimeoutError:
-    print("Session timeout: session did not become ready in time", file=sys.stderr)
+    print("Session timeout: session did not become ready in time")
     display.stop()
     return
 ```
