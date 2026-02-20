@@ -156,7 +156,8 @@ async def run(
     async def on_closed(code: str, reason: str | None) -> None:
         print(f"Connection closed: {code}")
 
-    async with client.connect() as session:
+    session = await client.connect_async()
+    async with session:
         print(f"Session: {session.session_id}")
         print("Press 'q' in the video window to quit early")
 
@@ -173,8 +174,13 @@ async def run(
         asyncio.create_task(consume_video())
         asyncio.create_task(consume_audio())
 
-        # Wait for WebRTC session ready before sending audio
-        await asyncio.wait_for(session_ready.wait(), timeout=30.0)
+        # Wait for the session to be ready before sending audio
+        try:
+            await asyncio.wait_for(session_ready.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            print("Session timeout: connection did not become ready in time", file=sys.stderr)
+            display.stop()
+            return
         print("Session ready, sending audio...")
 
         # Get PCM audio (now that we're ready to send)

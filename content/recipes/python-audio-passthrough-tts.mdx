@@ -99,7 +99,7 @@ The script runs the async session in a background thread and the OpenCV display 
 
 ## Waiting for the session to be ready
 
-In order to limit latency, the backend drops incoming audio until the session is established.
+To limit latency, the backend drops incoming audio until the session is established.
 To avoid audio loss, we register a handler with `@client.on(AnamEvent.SESSION_READY)` to be notified when the `SESSION_READY` event is emitted. 
 
 ```python
