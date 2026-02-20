@@ -1,0 +1,191 @@
+---
+title: Python audio passthrough with custom TTS
+tags: [python, audio-passthrough, tts, avatar, webRTC, beginner]
+date: 2025-02-19
+authors: [sebvanleuven]
+---
+
+Anam's audio passthrough mode lets you drive the avatar with your own TTS audio. Instead of using Anam's orchestration layer (STT/LLM/TTS pipeline), you directly send audio to generate the avatar. This is useful when you want to use a specific TTS provider, or want full control over the pipeline. 
+
+This recipe shows a script-style example: pass text on the command line, and the script connects to Anam, converts text to speech via ElevenLabs, and streams the audio to the avatar. It receives synchronised audio and video frames from the backend and displays the avatar video in an OpenCV window.
+
+The complete code is at [examples/python-audio-passthrough-tts](https://github.com/anam-org/anam-cookbook/tree/main/examples/python-audio-passthrough-tts).
+
+## What you'll build
+
+A Python script that:
+
+- Accepts `--text` as input and converts it to speech via ElevenLabs
+- Connects to Anam with audio passthrough
+- Sends the audio to the avatar, waits in listening mode for 5 seconds and exits when done
+- Receives synchronised audio and video frames from the backend
+- Displays the avatar video in an OpenCV window and plays the audio through sounddevice
+
+
+## Prerequisites
+
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/) for project management (or pip)
+- An Anam API key from [lab.anam.ai](https://lab.anam.ai)
+- An ElevenLabs API key from [elevenlabs.io](https://elevenlabs.io)
+- An avatar ID from [lab.anam.ai/avatars](https://lab.anam.ai/avatars) (or use the default Liv avatar: `071b0286-4cce-4808-bee2-e642f1062de3`)
+
+## Project setup
+
+Clone the cookbook and set up the example:
+
+```bash
+git clone https://github.com/anam-org/anam-cookbook.git
+cd anam-cookbook/examples/python-audio-passthrough-tts
+uv sync
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```bash
+ANAM_API_KEY=your_anam_api_key
+ANAM_AVATAR_ID=your_avatar_id
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+```
+<Tip>
+Never expose your API key in client-side code. The Python SDK is designed for server-side use. To run client-side code, we suggest to use the JavaScript SDK instead.
+</Tip>
+
+## Persona configuration
+
+With audio passthrough, configure the persona with only `avatar_id` and `enable_audio_passthrough=True`. Do not use `persona_id`—that would enable Anam's built-in LLM and interfere with your custom audio pipeline.
+
+```python
+from anam.types import PersonaConfig
+
+persona_config = PersonaConfig(
+    avatar_id=avatar_id,
+    enable_audio_passthrough=True,
+)
+```
+
+## Connecting and displaying the avatar
+
+Create the client, connect, and consume video and audio frames. The avatar appears as soon as the session is ready—you'll see it idling in a neutral pose. You can run this minimal setup by itself (e.g. for 10 seconds) to verify the connection before adding any audio:
+
+```python
+from anam import AnamClient, ClientOptions
+
+client = AnamClient(
+    api_key=api_key,
+    persona_config=persona_config,
+    options=ClientOptions(),
+)
+
+async with client.connect() as session:
+    async def consume_video():
+        async for frame in session.video_frames():
+            display.update(frame)
+    async def consume_audio():
+        async for frame in session.audio_frames():
+            audio_player.add_frame(frame)
+    asyncio.create_task(consume_video())
+    asyncio.create_task(consume_audio())
+
+    # Avatar idles—no audio sent yet. Run for 10s to verify, or press 'q' to quit
+    await asyncio.sleep(10)
+```
+
+The script runs the async session in a background thread and the OpenCV display on the main thread (required for window handling on macOS). Audio frames are played through sounddevice.
+<Tip>
+`video_frames()` and `audio_frames()` are async iterators—use `async for` to consume them. The frames are PyAV `VideoFrame` and `AudioFrame` objects: decoded WebRTC frames from aiortc (i.e. containing raw PCM audio and video pixels).
+</Tip>
+
+## Waiting for the session to be ready
+
+To limit latency, the backend drops incoming audio until the pipeline is ready and the session is established.
+To avoid audio loss, we register a handler with `@client.on(AnamEvent.SESSION_READY)` to be notified when the `SESSION_READY` event is emitted. 
+
+```python
+session_ready = asyncio.Event()
+
+@client.on(AnamEvent.SESSION_READY)
+async def on_session_ready() -> None:
+    session_ready.set()
+```
+
+After the webRTC session is connected, we'll wait until session_ready is set before sending TTS audio to the avatar. 
+
+```python
+try:
+    await asyncio.wait_for(session_ready.wait(), timeout=30.0)
+except asyncio.TimeoutError:
+    print("Session timeout: session did not become ready in time")
+    display.stop()
+    return
+```
+
+## Getting PCM audio
+
+Use the ElevenLabs SDK with `output_format="pcm_24000"` to get PCM 24kHz mono directly—no conversion needed.
+
+```python
+from elevenlabs.client import ElevenLabs
+
+client = ElevenLabs(api_key=api_key)
+response = client.text_to_speech.convert(
+    text="Hello, this is a test",
+    voice_id="EXAVITQu4vr4xnSDxMaL",
+    model_id="eleven_turbo_v2_5",
+    output_format="pcm_24000",
+)
+pcm_bytes = b"".join(response)
+```
+
+<Tip>
+Anam supports any sample rate between 16000 and 48000 Hz. However, for best performance, we suggest using 24000 Hz as this balances latency and audio quality.
+Anam does not resample the TTS audio internally, so the quality you provide is the quality that will be delivered. Note that for webRTC delivery, the audio is converted to 48000 Hz (stereo) and compressed with OPUS.
+</Tip>
+
+## Sending audio to the avatar
+
+Once you have PCM bytes, create an agent audio stream and send the chunks. Call `end_sequence()` when done so the avatar finishes rendering and returns to a neutral state. The script waits for playback duration plus 5 seconds before stopping the session:
+
+```python
+from anam.types import AgentAudioInputConfig
+
+agent = session.create_agent_audio_input_stream(
+    AgentAudioInputConfig(encoding="pcm_s16le", sample_rate=24000, channels=1)
+)
+
+chunk_size = 24000  # 500ms
+for i in range(0, len(pcm_bytes), chunk_size):
+    chunk = pcm_bytes[i : i + chunk_size]
+    if chunk:
+        await agent.send_audio_chunk(chunk)
+        await asyncio.sleep(0.01)
+
+await agent.end_sequence()
+
+# Wait for playback + extra time before stopping
+duration_sec = len(pcm_bytes) / (24000 * 2)
+await asyncio.sleep(duration_sec + 5.0)
+```
+
+<Tip>
+`end_sequence()` is essential for the avatar to behave naturally at the end of its turn and return to a neutral listening mode. When end_sequence() is not called, the pipeline assumes TTS audio is still incoming and it will stall the video generation. 
+Comment out end_sequence() to see this effect in action.
+</Tip>
+
+## Running the script
+
+```bash
+# Text via ElevenLabs
+uv run python main.py --text "Hello, this is a test"
+
+# Custom voice
+uv run python main.py --text "Hi" --voice YOUR_VOICE_ID
+```
+
+## Terminology
+
+- **Persona** – The full AI character (avatar + voice + LLM + system prompt)
+- **Avatar** – Just the visual character
+
+In audio passthrough mode, you provide the voice (TTS) yourself. The TTS audio is not parsed, nor added to LLM context or message history. 
