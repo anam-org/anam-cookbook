@@ -178,7 +178,7 @@ async def run(
         try:
             await asyncio.wait_for(session_ready.wait(), timeout=30.0)
         except asyncio.TimeoutError:
-            print("Session timeout: connection did not become ready in time", file=sys.stderr)
+            print("Session timeout: session did not become ready in time", file=sys.stderr)
             display.stop()
             return
         print("Session ready, sending audio...")

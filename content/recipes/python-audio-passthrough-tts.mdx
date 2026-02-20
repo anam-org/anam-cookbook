@@ -99,7 +99,7 @@ The script runs the async session in a background thread and the OpenCV display 
 
 ## Waiting for the session to be ready
 
-To limit latency, the backend drops incoming audio until the session is established.
+To limit latency, the backend drops incoming audio until the pipeline is ready and the session is established.
 To avoid audio loss, we register a handler with `@client.on(AnamEvent.SESSION_READY)` to be notified when the `SESSION_READY` event is emitted. 
 
 ```python
@@ -108,6 +108,17 @@ session_ready = asyncio.Event()
 @client.on(AnamEvent.SESSION_READY)
 async def on_session_ready() -> None:
     session_ready.set()
+```
+
+After the webRTC session is connected, we'll wait until session_ready is set before sending TTS audio to the avatar. 
+
+```python
+try:
+    await asyncio.wait_for(session_ready.wait(), timeout=30.0)
+except asyncio.TimeoutError:
+    print("Session timeout: session did not become ready in time", file=sys.stderr)
+    display.stop()
+    return
 ```
 
 ## Getting PCM audio
