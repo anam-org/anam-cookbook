@@ -1,0 +1,314 @@
+---
+title: Server-Side ElevenLabs Agents with Anam Avatars
+tags: [agents, javascript, nextjs, elevenlabs]
+difficulty: 'intermediate'
+sdk: 'javascript'
+date: 2026-02-26
+authors: [robbie-anam]
+---
+
+## Overview
+
+Anam's server-side ElevenLabs integration connects the Anam Engine directly to an ElevenLabs Conversational AI agent. Instead of bridging audio between two SDKs in the browser, you pass a signed URL when creating an Anam session token and the Engine handles the rest.
+
+Your client code gets simpler (no audio bridging, no microphone management, no muting the ElevenLabs speaker). Latency drops because audio flows server-to-server instead of through the browser. And you get session recordings and transcripts in Anam Lab, which the client-side approach can't provide.
+
+The full source code is available on [GitHub](https://github.com/robbie-anam/elevenlabs-agent/tree/feat/serverside).
+
+## Best practices for configuring ElevenLabs agents
+
+<Info>
+This section will be expanded with detailed agent configuration guidance. For now, configure your agent in the [ElevenLabs dashboard](https://elevenlabs.io) following their standard documentation.
+</Info>
+
+A few quick tips:
+
+- Use a V3 Conversational voice for the most expressive output
+- Keep the agent's system prompt short. Shorter prompts reduce first-response latency
+- Test your agent in the ElevenLabs playground before connecting it to Anam
+
+## How it works
+
+The ElevenLabs connection moves out of the browser and into the Anam Engine:
+
+```
+Server:
+  1. Fetch signed URL from ElevenLabs API
+  2. Create Anam session token with elevenLabsAgentSettings
+
+Client:
+  3. createClient(sessionToken)
+  4. streamToVideoElement("avatar-video")
+
+Engine (automatic):
+  5. Connects to ElevenLabs agent via signed URL
+  6. User speech → ElevenLabs STT → LLM → TTS → Anam face rendering
+  7. Avatar video delivered over WebRTC
+```
+
+Your client code looks the same as a standard Anam turnkey integration. All the ElevenLabs-specific logic is in the session token creation on the server.
+
+## Prerequisites
+
+- Node.js 18+
+- An [Anam](https://anam.ai) account and API key (sign up free at [lab.anam.ai](https://lab.anam.ai))
+- An [ElevenLabs](https://elevenlabs.io) account with a Conversational AI agent configured via the dashboard
+
+## Server-side setup
+
+You need one API route. It fetches a signed URL from ElevenLabs, then passes it to Anam when creating a session token.
+
+API keys stay server-side. The client sends only the `avatarId` (which face to render) and `agentId` (which ElevenLabs agent to use).
+
+### Environment variables
+
+```bash
+ANAM_API_KEY=your_anam_api_key
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+```
+
+### API route
+
+```typescript
+// app/api/anam-session/route.ts
+import { NextResponse } from "next/server";
+
+export async function POST(request: Request) {
+  const anamApiKey = process.env.ANAM_API_KEY;
+  if (!anamApiKey) {
+    return NextResponse.json(
+      { error: "ANAM_API_KEY must be set" },
+      { status: 500 }
+    );
+  }
+
+  const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
+  if (!elevenLabsApiKey) {
+    return NextResponse.json(
+      { error: "ELEVENLABS_API_KEY must be set" },
+      { status: 500 }
+    );
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const { avatarId, agentId } = body;
+
+  if (!avatarId) {
+    return NextResponse.json(
+      { error: "avatarId is required" },
+      { status: 400 }
+    );
+  }
+  if (!agentId) {
+    return NextResponse.json(
+      { error: "agentId is required" },
+      { status: 400 }
+    );
+  }
+
+  // 1. Get a signed URL from ElevenLabs
+  const elRes = await fetch(
+    `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
+    {
+      headers: { "xi-api-key": elevenLabsApiKey },
+    }
+  );
+
+  if (!elRes.ok) {
+    const text = await elRes.text();
+    return NextResponse.json(
+      { error: `ElevenLabs API error: ${elRes.status} ${text}` },
+      { status: elRes.status }
+    );
+  }
+
+  const { signed_url: signedUrl } = await elRes.json();
+
+  // 2. Create an Anam session token with the ElevenLabs agent settings
+  const anamRes = await fetch("https://api.anam.ai/v1/auth/session-token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${anamApiKey}`,
+    },
+    body: JSON.stringify({
+      personaConfig: { avatarId },
+      environment: {
+        elevenLabsAgentSettings: {
+          signedUrl,
+          agentId,
+        },
+      },
+    }),
+  });
+
+  if (!anamRes.ok) {
+    const text = await anamRes.text();
+    return NextResponse.json(
+      { error: `Anam API error: ${anamRes.status} ${text}` },
+      { status: anamRes.status }
+    );
+  }
+
+  const data = await anamRes.json();
+  return NextResponse.json({ sessionToken: data.sessionToken });
+}
+```
+
+The only difference from a standard Anam session token is the `environment.elevenLabsAgentSettings` field. This tells the Engine to connect to the ElevenLabs agent instead of running Anam's built-in STT/LLM/TTS pipeline.
+
+<Info>
+The signed URL is short-lived (typically valid for 15 minutes). The Anam Engine uses it immediately when the client connects, so there's no issue with expiry in normal usage. If you're pre-fetching tokens, create them just before the client needs them.
+</Info>
+
+## Client-side setup
+
+The client code is the same as any standard Anam integration. You pass `avatarId` and `agentId` when requesting the session token:
+
+```typescript
+import { createClient } from "@anam-ai/js-sdk";
+
+const res = await fetch("/api/anam-session", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ avatarId, agentId }),
+});
+const { sessionToken } = await res.json();
+
+const client = createClient(sessionToken);
+await client.streamToVideoElement("avatar-video");
+```
+
+No ElevenLabs SDK, no audio bridging, no microphone management. The Engine handles the conversation.
+
+### Working component example
+
+Below is a React component with connection lifecycle and a streaming transcript.
+
+The `MESSAGE_STREAM_EVENT_RECEIVED` event fires for each chunk of text from both the user and the agent. Accumulate chunks by message ID to build the full transcript.
+
+```typescript
+"use client";
+
+import { useRef, useState, useCallback } from "react";
+import { AnamEvent, createClient, type AnamClient } from "@anam-ai/js-sdk";
+
+type Message = {
+  id: string;
+  role: "user" | "persona";
+  content: string;
+  interrupted?: boolean;
+};
+
+export default function AvatarChat({
+  avatarId,
+  agentId,
+}: {
+  avatarId: string;
+  agentId: string;
+}) {
+  const clientRef = useRef<AnamClient | null>(null);
+  const [status, setStatus] = useState<"idle" | "connecting" | "connected">("idle");
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  const start = useCallback(async () => {
+    setStatus("connecting");
+    setMessages([]);
+
+    const res = await fetch("/api/anam-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ avatarId, agentId }),
+    });
+    const { sessionToken } = await res.json();
+
+    const anamClient = createClient(sessionToken);
+    clientRef.current = anamClient;
+
+    // Accumulate transcript chunks by message ID
+    anamClient.addListener(
+      AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED,
+      (evt: {
+        id: string;
+        content: string;
+        role: string;
+        interrupted: boolean;
+      }) => {
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === evt.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = {
+              ...next[idx],
+              content: next[idx].content + evt.content,
+              interrupted: evt.interrupted,
+            };
+            return next;
+          }
+          return [
+            ...prev,
+            {
+              id: evt.id,
+              role: evt.role as "user" | "persona",
+              content: evt.content,
+              interrupted: evt.interrupted,
+            },
+          ];
+        });
+      }
+    );
+
+    anamClient.addListener(AnamEvent.CONNECTION_CLOSED, () => {
+      setStatus("idle");
+    });
+
+    await anamClient.streamToVideoElement("avatar-video");
+    setStatus("connected");
+  }, [avatarId, agentId]);
+
+  const stop = useCallback(async () => {
+    await clientRef.current?.stopStreaming();
+    clientRef.current = null;
+    setStatus("idle");
+  }, []);
+
+  return (
+    <div>
+      <video id="avatar-video" autoPlay playsInline />
+      <button onClick={status === "connected" ? stop : start}>
+        {status === "connected" ? "Stop" : "Start"}
+      </button>
+    </div>
+  );
+}
+```
+
+For more on event handling, message history, and connection lifecycle, see the [basic Next.js app recipe](/basic-nextjs-app).
+
+## What works and what doesn't
+
+These ElevenLabs agent features all work through the server-side integration: voice intelligence (STT, LLM, TTS), expressive V3 voices, interruption handling, custom knowledge bases, server-side tools (webhooks), and conversation history.
+
+Client tools (tools that execute in the browser) are not yet supported. If your agent relies on client tools, use the [client-side integration](/elevenlabs-expressive-voice-agents) instead.
+
+## Troubleshooting
+
+**"Failed to get ElevenLabs signed URL"**
+- Verify `ELEVENLABS_API_KEY` is set and valid
+- Confirm the `agentId` matches an agent in your ElevenLabs dashboard
+- Check that your ElevenLabs plan includes Conversational AI access
+
+**Avatar connects but no conversation starts**
+- The signed URL may have expired. Create the session token right before the client needs it, not minutes in advance
+- Verify the ElevenLabs agent is active and not paused in the dashboard
+
+**"Anam API error: 400" when creating the session token**
+- Check that `avatarId` is valid. Find available avatars at [lab.anam.ai/avatars](https://lab.anam.ai/avatars)
+- Make sure the `elevenLabsAgentSettings` object includes both `signedUrl` and `agentId`
+
+**Avatar lips not syncing / no audio**
+- This integration handles audio format matching automatically. If you hit this, check the ElevenLabs agent configuration and make sure it's using a supported voice model
+
+**Session recordings not appearing in Anam Lab**
+- Recordings are generated after the session ends. Allow a few minutes for processing
+- Check the session completed cleanly (the client called `stopStreaming()` or the connection closed normally)
