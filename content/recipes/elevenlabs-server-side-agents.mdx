@@ -17,15 +17,15 @@ The full source code is available on [GitHub](https://github.com/robbie-anam/ele
 
 ## Best practices for configuring ElevenLabs agents
 
-<Info>
-This section will be expanded with detailed agent configuration guidance. For now, configure your agent in the [ElevenLabs dashboard](https://elevenlabs.io) following their standard documentation.
-</Info>
+All of this configuration happens in the [ElevenLabs agent dashboard](https://elevenlabs.io/app/agents/agents).
 
-A few quick tips:
+**LLM choice.** Pick a model with low latency and fast throughput. Reasoning models are not recommended unless you're using a high-throughput provider like Groq. If slower LLM responses are a problem, try configuring Speculative Turn in the Advanced menu to use filler phrases (either from a faster LLM, or a set list) while the main response generates.
 
-- Use a V3 Conversational voice for the most expressive output
-- Keep the agent's system prompt short. Shorter prompts reduce first-response latency
-- Test your agent in the ElevenLabs playground before connecting it to Anam
+**Voices.** For maximum expressivity, use a V3 voice with Expressive mode enabled. Add audio tags to the system prompt for things like laughter, which works well with some avatars. If latency is your highest concern, it's worth trying Flash or other models that are less expressive but faster.
+
+**Background noise.** If background noise is being picked up, turn on the Filter Background Speech toggle in the Advanced menu.
+
+**Response speed.** For the quickest responses, set Eagerness to Eager in the Advanced menu.
 
 ## How it works
 
