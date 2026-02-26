@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { Inter } from 'next/font/google';
 import Link from 'next/link';
 import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { PostHogProvider } from '@/components/PostHogProvider';
+import { PostHogPageView } from '@/components/PostHogPageView';
 import { Header } from '@/components/Header';
 import { getAllRecipes } from '@/lib/recipes';
 
@@ -98,11 +101,16 @@ export default function RootLayout({
         />
       </head>
       <body className={`${inter.className} min-h-screen flex flex-col`}>
-        <ThemeProvider defaultTheme="dark">
-          <Header recipes={recipes} />
-          <main className="flex-1">{children}</main>
-          <Footer />
-        </ThemeProvider>
+        <PostHogProvider>
+          <Suspense fallback={null}>
+            <PostHogPageView />
+          </Suspense>
+          <ThemeProvider defaultTheme="dark">
+            <Header recipes={recipes} />
+            <main className="flex-1">{children}</main>
+            <Footer />
+          </ThemeProvider>
+        </PostHogProvider>
       </body>
     </html>
   );
