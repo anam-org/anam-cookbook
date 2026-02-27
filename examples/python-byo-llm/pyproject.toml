@@ -1,0 +1,17 @@
+[project]
+name = "python-byo-llm"
+version = "0.1.0"
+description = "Python BYO LLM: send your LLM's output to Anam for TTS and avatar"
+requires-python = ">=3.10"
+dependencies = [
+    "anam",
+    "opencv-python>=4.9.0",
+    "python-dotenv>=1.2.1",
+    "sounddevice>=0.4.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+anam = { path = "../../../python-sdk", editable = true }
