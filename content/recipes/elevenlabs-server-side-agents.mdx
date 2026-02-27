@@ -19,11 +19,13 @@ The full source code is available on [GitHub](https://github.com/robbie-anam/ele
 
 All of this configuration happens in the [ElevenLabs agent dashboard](https://elevenlabs.io/app/agents/agents).
 
-**LLM choice.** Pick a model with low latency and fast throughput. Reasoning models are not recommended unless you're using a high-throughput provider like Groq. If slower LLM responses are a problem, set a soft timeout in the Advanced tab (e.g. 2 seconds) and configure it to either use a fixed filler phrase or generate one with a faster LLM while the main response generates.
+**LLM choice.** Pick a model with low latency and fast throughput — for example we found Qwen3-30B-A3B to be great for low latency. Reasoning models are not recommended unless you're using a high-throughput provider like Groq. If slower LLM responses are a problem, set a soft timeout in the Advanced tab (e.g. 2 seconds) and configure it to either use a fixed filler phrase or generate one with a faster LLM while the main response generates.
 
 **Voices.** For maximum expressivity, use a V3 voice with Expressive mode enabled. Add audio tags to the system prompt for things like laughter, which works well with some avatars. If latency is your highest concern, it's worth trying Flash or other models that are less expressive but faster.
 
 **Background noise.** If background noise is being picked up, turn on the Filter Background Speech toggle in the Advanced menu. It's unclear whether this has an effect on latency.
+
+**User input audio format.** In the Advanced tab, set the user input audio format to **PCM 16000Hz**. Other input formats are not currently supported with Anam.
 
 **Response speed.** For the quickest responses, set Eagerness to Eager in the Advanced menu.
 
@@ -160,6 +162,110 @@ The only difference from a standard Anam session token is the `environment.eleve
 <Info>
 The signed URL is short-lived (typically valid for 15 minutes). The Anam Engine uses it immediately when the client connects, so there's no issue with expiry in normal usage. If you're pre-fetching tokens, create them just before the client needs them.
 </Info>
+
+## Per-session customisation
+
+The Anam session token API accepts additional fields that are passed through to ElevenLabs when starting the conversation. These let you personalise each session — greet users by name, switch languages, override the system prompt, or pass data to a custom LLM backend. See the [ElevenLabs personalisation overview](https://elevenlabs.io/docs/eleven-agents/customization/personalization) for full details.
+
+All of these fields are optional and go inside `elevenLabsAgentSettings` alongside `signedUrl` and `agentId`:
+
+```typescript
+body: JSON.stringify({
+  personaConfig: { avatarId },
+  environment: {
+    elevenLabsAgentSettings: {
+      signedUrl,
+      agentId,
+      dynamicVariables: { ... },          // optional
+      conversationConfigOverride: { ... }, // optional
+      userId: "...",                       // optional
+      customLlmExtraBody: { ... },        // optional
+    },
+  },
+}),
+```
+
+### Dynamic variables
+
+Dynamic variables are the simplest way to personalise a conversation at runtime. Define placeholders like `{{user_name}}` in your agent's system prompt or first message in the ElevenLabs dashboard, then fill them in when creating the session token:
+
+```typescript
+body: JSON.stringify({
+  personaConfig: { avatarId },
+  environment: {
+    elevenLabsAgentSettings: {
+      signedUrl,
+      agentId,
+      dynamicVariables: {
+        user_name: "Alice",
+        account_type: "premium",
+      },
+    },
+  },
+}),
+```
+
+See [ElevenLabs dynamic variables docs](https://elevenlabs.io/docs/eleven-agents/customization/personalization/dynamic-variables) for the full syntax.
+
+### Overrides
+
+Overrides let you change agent behaviour per conversation — things like the first message, language, system prompt, or TTS voice. Only include the fields you want to override; everything else keeps its default from the ElevenLabs dashboard.
+
+```typescript
+body: JSON.stringify({
+  personaConfig: { avatarId },
+  environment: {
+    elevenLabsAgentSettings: {
+      signedUrl,
+      agentId,
+      conversationConfigOverride: {
+        agent: {
+          prompt: {
+            prompt: "You are a helpful assistant. Always respond in Spanish.",
+          },
+          firstMessage: "¡Hola! ¿En qué puedo ayudarte hoy?",
+          language: "es",
+        },
+      },
+    },
+  },
+}),
+```
+
+See [ElevenLabs overrides docs](https://elevenlabs.io/docs/eleven-agents/customization/personalization/overrides) for the full list of overridable fields.
+
+### User ID
+
+Pass `userId` to identify the caller in ElevenLabs analytics and conversation history:
+
+```typescript
+elevenLabsAgentSettings: {
+  signedUrl,
+  agentId,
+  userId: "user_abc123",
+},
+```
+
+### Custom LLM extra body
+
+If your ElevenLabs agent is configured to call a custom LLM backend, `customLlmExtraBody` lets you pass arbitrary parameters alongside each request:
+
+```typescript
+body: JSON.stringify({
+  personaConfig: { avatarId },
+  environment: {
+    elevenLabsAgentSettings: {
+      signedUrl,
+      agentId,
+      customLlmExtraBody: {
+        session_context: { region: "eu", tier: "enterprise" },
+      },
+    },
+  },
+}),
+```
+
+See [ElevenLabs custom LLM docs](https://elevenlabs.io/docs/eleven-agents/customization/llm/custom-llm) for how to set up a custom LLM backend.
 
 ## Client-side setup
 
