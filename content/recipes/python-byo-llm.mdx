@@ -1,0 +1,133 @@
+---
+title: Python BYO LLM with Anam TTS and avatar
+tags: [python, custom-llm, tts, avatar, beginner]
+date: 2025-02-24
+authors: [sebvanleuven]
+---
+
+When you run your own LLM, you need Anam to handle only TTS and avatar, not the full pipeline. Set `llm_id="CUSTOMER_CLIENT_V1"` to disable Anam's LLM in the orchestration layer. You send your LLM's output via `talk_stream.send()`, and Anam converts it to speech and renders the avatar.
+
+This recipe focuses on **PersonaConfig** with `llm_id=CUSTOMER_CLIENT_V1`, sending example LLM output via `create_talk_stream()` and `talk_stream.send()`, and interruption handling with `TALK_STREAM_INTERRUPTED` callback.
+
+The complete code is at [examples/python-byo-llm](https://github.com/anam-org/anam-cookbook/tree/main/examples/python-byo-llm).
+
+## What you'll build
+
+A Python script that:
+
+- Uses **PersonaConfig** with `llm_id="CUSTOMER_CLIENT_V1"` (disables Anam's LLM)
+- Connects with `connect_async()` and disables session recordings
+- Sends your LLM's output via `create_talk_stream()` and `talk_stream.send()` on the `TalkMessageStream`
+- Handles interruptions with `TALK_STREAM_INTERRUPTED` callback
+- Displays the avatar and plays audio
+
+The script reads LLM output from a file, one text chunk per line. It adds a 450ms delay between chunks to simulate real-time LLM streaming. 
+
+## Prerequisites
+
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
+- Anam API key from [lab.anam.ai](https://lab.anam.ai)
+- Avatar and voice IDs from [lab.anam.ai](https://lab.anam.ai)
+
+## Disabling Anam's LLM: CUSTOMER_CLIENT_V1
+
+To use your own LLM, you must disable Anam's built-in LLM. Set `llm_id="CUSTOMER_CLIENT_V1"` in PersonaConfig. This tells Anam's orchestration layer that the LLM is provided by the customer—Anam will not run its own LLM. You send your LLM's output via `talk_stream.send()`, which goes directly to TTS.
+
+```python
+from anam.types import PersonaConfig
+
+persona_config = PersonaConfig(
+    avatar_id="your-avatar-id",
+    voice_id="your-voice-id",
+    llm_id="CUSTOMER_CLIENT_V1",  # Required: disables Anam's LLM
+    enable_audio_passthrough=False,
+)
+```
+
+**Why this is required:** Without `CUSTOMER_CLIENT_V1`, Anam would run its own LLM. This will create its own stream of LLM output and create additional TTS segments. This interferes with your LLM output and conversation context and will result in poor user experience.
+
+## Connecting with connect_async and disabling session recordings
+
+Use `connect_async()` instead of `connect()` when you need to pass session options. Set `enable_session_replay=False` to disable session recordings.
+
+```python
+from anam import AnamClient, AnamEvent, ClientOptions
+from anam.types import SessionOptions
+
+client = AnamClient(
+    api_key=api_key,
+    persona_config=persona_config,
+    options=ClientOptions(),
+)
+
+session_options = SessionOptions(enable_session_replay=False)
+session = await client.connect_async(session_options=session_options)
+
+try:
+    # ... use session
+finally:
+    await session.close()
+```
+
+## Sending your LLM's output
+
+Wait for `SESSION_READY` before sending chunks. Create a `TalkMessageStream` with `create_talk_stream()` and send text chunks with `talk_stream.send()`. The stream manages correlation IDs internally for interruption handling. Set `end_of_speech=True` on the final chunk:
+
+```python
+talk_stream = session.create_talk_stream()
+for i, text in enumerate(chunks):
+    await talk_stream.send(text, end_of_speech=(i == len(chunks) - 1))
+```
+
+If your LLM streams chunks without a clear "last chunk" signal (e.g. consuming async iterators), call `talk_stream.end()` when done to signal end of speech.
+
+
+Register `TALK_STREAM_INTERRUPTED` callback to handle interruption events. Flush any remaining text in the buffer/response and create a new `TalkMessageStream` when the user interrupts. A new TalkMessageStream is required to create a new correlation_id so that the new LLM output is mapped on the new turn. 
+
+```python
+@client.on(AnamEvent.TALK_STREAM_INTERRUPTED)
+async def on_talk_stream_interrupted(correlation_id: str | None) -> None:
+    print(f"Application level talk stream interruption handling for: {correlation_id}")
+    nonlocal talk_stream
+    # Flush the LLM output buffer to avoid stale output being sent
+    llm_output_buffer.clear()
+    # Create a new talk stream for the new turn
+    talk_stream = session.create_talk_stream()
+    follow_up = "Okay, interrupted. What else can I help you with today?"
+    await talk_stream.send(follow_up, end_of_speech=True)
+```
+For a single message, you can use `session.send_talk_stream(content)` as a convenience method, it creates a stream, sends, and ends in one call. However, this is discouraged for streaming LLM output due to the overhead and complexity around interrupt handling.
+
+## Project setup
+
+```bash
+git clone https://github.com/anam-org/anam-cookbook.git
+cd anam-cookbook/examples/python-byo-llm
+uv sync
+cp .env.example .env
+```
+
+Edit `.env`:
+```bash
+ANAM_API_KEY=your_key
+ANAM_AVATAR_ID=your_avatar_id
+ANAM_VOICE_ID=your_voice_id
+```
+
+## Running the script
+
+```bash
+uv run python main.py                    # uses llm_output_sample.txt
+uv run python main.py path/to/chunks.txt # custom file (one text chunk per line)
+```
+
+Press `q` in the video window to quit, `i` to interrupt the avatar.
+
+## Terminology
+
+- **Avatar** – Just the visual character
+- **TTS** – Text-to-speech engine
+- **LLM** – Language model
+
+With `CUSTOMER_CLIENT_V1`, you provide the LLM. Anam provides TTS and avatar—a single pipeline from your text to lip-synced video.
