@@ -19,11 +19,11 @@ The full source code is available on [GitHub](https://github.com/robbie-anam/ele
 
 All of this configuration happens in the [ElevenLabs agent dashboard](https://elevenlabs.io/app/agents/agents).
 
-**LLM choice.** Pick a model with low latency and fast throughput. Reasoning models are not recommended unless you're using a high-throughput provider like Groq. If slower LLM responses are a problem, try configuring Speculative Turn in the Advanced menu to use filler phrases (either from a faster LLM, or a set list) while the main response generates.
+**LLM choice.** Pick a model with low latency and fast throughput. Reasoning models are not recommended unless you're using a high-throughput provider like Groq. If slower LLM responses are a problem, set a soft timeout in the Advanced tab (e.g. 2 seconds) and configure it to either use a fixed filler phrase or generate one with a faster LLM while the main response generates.
 
 **Voices.** For maximum expressivity, use a V3 voice with Expressive mode enabled. Add audio tags to the system prompt for things like laughter, which works well with some avatars. If latency is your highest concern, it's worth trying Flash or other models that are less expressive but faster.
 
-**Background noise.** If background noise is being picked up, turn on the Filter Background Speech toggle in the Advanced menu.
+**Background noise.** If background noise is being picked up, turn on the Filter Background Speech toggle in the Advanced menu. It's unclear whether this has an effect on latency.
 
 **Response speed.** For the quickest responses, set Eagerness to Eager in the Advanced menu.
 
