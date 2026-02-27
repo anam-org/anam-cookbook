@@ -19,7 +19,6 @@ A Python script that:
 - Connects with `connect_async()` and disables session recordings
 - Sends your LLM's output via `create_talk_stream()` and `talk_stream.send()` on the `TalkMessageStream`
 - Handles interruptions with `TALK_STREAM_INTERRUPTED` callback
-- Listens for **real-time words** (`MESSAGE_STREAM_EVENT_RECEIVED`)
 - Displays the avatar and plays audio
 
 The script reads LLM output from a file, one text chunk per line. It adds a 450ms delay between chunks to simulate real-time LLM streaming. 

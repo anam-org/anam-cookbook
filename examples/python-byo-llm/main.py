@@ -6,8 +6,6 @@ Uses llm_id="CUSTOMER_CLIENT_V1" to disable Anam's LLM in the orchestration laye
 This example focuses on:
 - PersonaConfig with CUSTOMER_CLIENT_V1 (disables Anam's LLM)
 - Sending LLM output via talk_stream.send() from a file (one text chunk per line)
-- Real-time streaming words (MESSAGE_STREAM_EVENT_RECEIVED)
-- Full message history (get_message_history, MESSAGE_HISTORY_UPDATED)
 - Interrupt: press 'i' to call session.interrupt(); client TALK_STREAM_INTERRUPTED callback creates new stream
 
 Usage:
@@ -155,27 +153,6 @@ async def run(
         options=ClientOptions(),
     )
 
-    # Real-time streaming words: MESSAGE_STREAM_EVENT_RECEIVED
-    @client.on(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED)
-    async def on_stream_event(event) -> None:
-        role_label = "User" if event.role == MessageRole.USER else "Persona"
-        if event.content_index == 0:
-            print(f"\n{role_label}: ", end="", flush=True)
-        print(event.content, end="", flush=True)
-        if event.end_of_speech:
-            status = " ✓" if not event.interrupted else " (interrupted)"
-            print(status)
-
-    # Full message history: MESSAGE_HISTORY_UPDATED
-    @client.on(AnamEvent.MESSAGE_HISTORY_UPDATED)
-    async def on_history_updated(messages) -> None:
-        print("\n--- Message history ---")
-        for m in messages:
-            role = m.role.value.capitalize()
-            content = m.content[:80] + "..." if len(m.content) > 80 else m.content
-            print(f"  {role}: {content}")
-        print("-----------------------\n")
-
     @client.on(AnamEvent.CONNECTION_ESTABLISHED)
     async def on_connected() -> None:
         print("Connected to Anam")
@@ -247,12 +224,6 @@ async def run(
         # Keep the connection open for 60 seconds - or until the user quits
         await asyncio.sleep(60.0)
 
-        # Print final message history
-        history = client.get_message_history()
-        print("\n=== Final message history ===")
-        for m in history:
-            print(f"  {m.role.value}: {m.content}")
-        print("=============================")
     finally:
         await session.close()
 
