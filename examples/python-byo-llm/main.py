@@ -132,7 +132,7 @@ def _load_llm_chunks(path: str) -> list[str]:
 
 async def run(
     api_key: str,
-    llm_chunks_path: str,
+    llm_output_path: str,
     display: VideoDisplay,
     audio_player: AudioPlayer,
     on_interrupt_ref: list | None = None,
@@ -167,11 +167,15 @@ async def run(
     await asyncio.wait_for(session_ready.wait(), timeout=30)
 
     talk_stream = session.create_talk_stream()
+    llm_output_buffer = _load_llm_chunks(llm_output_path)
     
     @client.on(AnamEvent.TALK_STREAM_INTERRUPTED)
     async def on_talk_stream_interrupted(correlation_id: str | None) -> None:
         print(f"Application level talk stream interruption handling for: {correlation_id}")
         nonlocal talk_stream
+        # Flush the LLM output buffer to avoid stale output being sent
+        llm_output_buffer.clear()
+        # Create a new talk stream for the new turn
         talk_stream = session.create_talk_stream()
         follow_up = "Okay, interrupted. What else can I help you with today?"
         await talk_stream.send(follow_up, end_of_speech=True)
@@ -200,17 +204,16 @@ async def run(
         asyncio.create_task(consume_audio())
 
         # Send LLM output directly to TTS (bypasses Anam's LLM)
-        chunks = _load_llm_chunks(llm_chunks_path)
-        print(f"Streaming {len(chunks)} chunks from {llm_chunks_path}")
+        print(f"Streaming {len(llm_output_buffer)} chunks from {llm_output_path}")
         talk_stream = session.create_talk_stream()
-        for i, text in enumerate(chunks):
-            await asyncio.sleep(0.450)            
+        for i, text in enumerate(llm_output_buffer):
             if talk_stream is not None and talk_stream.is_active:
                 try:
                     await talk_stream.send(
                         text,
-                        end_of_speech=(i == len(chunks) - 1),
+                        end_of_speech=(i == len(llm_output_buffer) - 1),
                     )
+                    await asyncio.sleep(0.450)            
                 except RuntimeError:
                     pass
 
@@ -253,7 +256,7 @@ def main() -> None:
             asyncio.run(
                 run(
                     api_key=api_key,
-                    llm_chunks_path=args.file,
+                    llm_output_path=args.file,
                     display=display,
                     audio_player=audio_player,
                     on_interrupt_ref=on_interrupt_ref,

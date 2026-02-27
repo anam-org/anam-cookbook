@@ -85,6 +85,18 @@ If your LLM streams chunks without a clear "last chunk" signal (e.g. consuming a
 
 Register `TALK_STREAM_INTERRUPTED` callback to handle interruption events. Flush any remaining text in the buffer/response and create a new `TalkMessageStream` when the user interrupts. A new TalkMessageStream is required to create a new correlation_id so that the new LLM output is mapped on the new turn. 
 
+```python
+@client.on(AnamEvent.TALK_STREAM_INTERRUPTED)
+async def on_talk_stream_interrupted(correlation_id: str | None) -> None:
+    print(f"Application level talk stream interruption handling for: {correlation_id}")
+    nonlocal talk_stream
+    # Flush the LLM output buffer to avoid stale output being sent
+    llm_output_buffer.clear()
+    # Create a new talk stream for the new turn
+    talk_stream = session.create_talk_stream()
+    follow_up = "Okay, interrupted. What else can I help you with today?"
+    await talk_stream.send(follow_up, end_of_speech=True)
+```
 For a single message, you can use `session.send_talk_stream(content)` as a convenience method, it creates a stream, sends, and ends in one call. However, this is discouraged for streaming LLM output due to the overhead and complexity around interrupt handling.
 
 ## Project setup
