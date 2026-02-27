@@ -17,7 +17,6 @@ Requires: ANAM_API_KEY, ANAM_AVATAR_ID, ANAM_VOICE_ID
 
 import argparse
 import asyncio
-import logging
 import os
 import sys
 import threading
@@ -26,7 +25,7 @@ import cv2
 from dotenv import load_dotenv
 
 from anam import AnamClient, AnamEvent, ClientOptions
-from anam.types import MessageRole, PersonaConfig, SessionOptions
+from anam.types import PersonaConfig, SessionOptions
 
 _ = load_dotenv()
 
@@ -35,12 +34,6 @@ DEFAULT_VOICE_ID = "b8a3b36d-7869-4085-aa50-98eed85a1415"
 
 # Required to disable Anam's LLM, you provide the LLM output via talk_stream.send()
 CUSTOMER_CLIENT_V1 = "CUSTOMER_CLIENT_V1"
-
-logging.basicConfig(level=logging.WARNING)
-logging.getLogger("anam").setLevel(logging.DEBUG)
-# logging.getLogger("aiortc").setLevel(logging.WARNING)
-# logging.getLogger("aioice").setLevel(logging.WARNING)
-# logging.getLogger("websocket").setLevel(logging.WARNING)
 
 class VideoDisplay:
     """Display video frames in an OpenCV window."""
