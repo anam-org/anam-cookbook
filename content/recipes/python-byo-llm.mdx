@@ -89,7 +89,7 @@ Register `TALK_STREAM_INTERRUPTED` callback to handle interruption events. Flush
 @client.on(AnamEvent.TALK_STREAM_INTERRUPTED)
 async def on_talk_stream_interrupted(correlation_id: str | None) -> None:
     print(f"Application level talk stream interruption handling for: {correlation_id}")
-    nonlocal talk_stream
+    global talk_stream
     # Flush the LLM output buffer to avoid stale output being sent
     llm_output_buffer.clear()
     # Create a new talk stream for the new turn
