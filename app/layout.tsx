@@ -12,20 +12,20 @@ import { getAllRecipes } from '@/lib/recipes';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Anam Cookbook',
-  description: 'Cookbooks and examples for building with Anam AI avatars',
+  title: 'Anam Cookbook: AI Avatar Tutorials & Integration Guides',
+  description: 'Tutorials and code examples for building with real-time AI avatars. Integrate Anam with Next.js, LiveKit, ElevenLabs, Python, Shopify, and more.',
   metadataBase: new URL('https://anam.ai/cookbook'),
   openGraph: {
-    title: 'Anam Cookbook',
-    description: 'Cookbooks and examples for building with Anam AI avatars',
+    title: 'Anam Cookbook: AI Avatar Tutorials & Integration Guides',
+    description: 'Tutorials and code examples for building with real-time AI avatars. Integrate Anam with Next.js, LiveKit, ElevenLabs, Python, Shopify, and more.',
     url: 'https://anam.ai/cookbook',
     siteName: 'Anam Cookbook',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Anam Cookbook',
-    description: 'Cookbooks and examples for building with Anam AI avatars',
+    title: 'Anam Cookbook: AI Avatar Tutorials & Integration Guides',
+    description: 'Tutorials and code examples for building with real-time AI avatars. Integrate Anam with Next.js, LiveKit, ElevenLabs, Python, Shopify, and more.',
   },
 };
 
