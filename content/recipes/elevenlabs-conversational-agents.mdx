@@ -1,14 +1,17 @@
 ---
 title: ElevenLabs Conversational AI with Anam avatars (Client-Side)
 tags: [agents, javascript, elevenlabs]
-date: 2025-01-19
+date: 2026-01-19
 authors: [stukennedy, ao-anam]
 ---
 
 ElevenLabs Conversational AI gives you voice agents with natural speech recognition and synthesis. But voice-only agents can feel disembodied. By adding an Anam avatar, you give your agent a face that moves in sync with its speech.
 
 <Warning>
-**A server-side integration is now available.** Unless you have a specific need for client-side audio bridging (e.g. client tools), we strongly recommend the [server-side ElevenLabs agents recipe](/elevenlabs-server-side-agents) instead. It's simpler, lower latency, and provides better session monitoring.
+**A server-side integration is now available.** Unless you have a specific need for client-side audio bridging (e.g. client tools), we strongly recommend the [server-side ElevenLabs agents cookbook](/elevenlabs-server-side-agents) instead. It's simpler, lower latency, and provides better session monitoring.
+</Warning>
+<Warning>
+**A newer client-side integration is now available.** If you are still looking for a client-side integration, see the [Expressive Voice Agents with ElevenLabs and Anam Avatars (Client-Side)](/recipes/elevenlabs-expressive-voice-agents) cookbook for a simpler, more efficient approach.
 </Warning>
 
 This integration uses Anam's audio passthrough mode. Instead of using Anam's built-in STT/LLM/TTS pipeline, you send audio directly from ElevenLabs to the avatar for lip-syncing:
