@@ -89,6 +89,9 @@ Before setting up the app, create an agent in ElevenLabs:
 <tip>
 Anam accepts a wide range of sampling rates, but suggests to use pcm_24000 as this provides the best balance of latency and audio quality.
 </tip>
+<Warning>
+Anam's audio passthrough expects raw PCM 16 bit. Other formats (mp3, opus) won't work.
+</Warning>
 
 ### Environment variables
 
@@ -283,12 +286,12 @@ await anamClient.streamToVideoElement("avatar-video");
 
 ### Setting up the audio input stream
 
-The audio input stream tells Anam what format to expect from the incoming audio chunks. This must match the ElevenLabs agent's output format: PCM 16-bit, 16 kHz, mono.
+The audio input stream tells Anam what format to expect from the incoming audio chunks. This must match the ElevenLabs agent's output format: PCM 16-bit, 24 kHz, mono.
 
 ```typescript
 const audioInputStream = anamClient.createAgentAudioInputStream({
   encoding: "pcm_s16le",
-  sampleRate: 16000,
+  sampleRate: 24000,
   channels: 1,
 });
 ```
@@ -490,7 +493,7 @@ Interrupted messages render with an `[interrupted]` tag so the user can see wher
 ## Troubleshooting
 
 **No audio from the avatar / lips not moving**
-- Confirm the ElevenLabs agent output format is `pcm_16000`. Other formats (mp3, opus, different sample rates) are not compatible with Anam's audio passthrough.
+- Confirm the ElevenLabs agent output format is `pcm_24000`. Other formats (mp3, opus) are not compatible with Anam's audio passthrough.
 - Check the browser console for errors from the Anam session token route.
 
 **Double audio (hearing speech twice)**
