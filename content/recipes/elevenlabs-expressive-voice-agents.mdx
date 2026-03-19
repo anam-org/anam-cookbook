@@ -64,7 +64,7 @@ Signed URLs (used in this example) default to WebSocket.
 - Node.js 18+
 - An [Anam](https://anam.ai) account and API key (sign up free at [lab.anam.ai](https://lab.anam.ai))
 - An [ElevenLabs](https://elevenlabs.io) account and API key
-- An ElevenLabs Conversational Agent configured with a V3 voice and `pcm_16000` output format
+- An ElevenLabs Conversational Agent configured with a V3 voice and `pcm_16000` user input audio format
 
 ## Project Setup
 
@@ -83,11 +83,11 @@ Before setting up the app, create an agent in ElevenLabs:
 1. Go to [elevenlabs.io](https://elevenlabs.io) → **Agents** → **Create Agent**
 2. Configure the agent's system prompt and personality
 3. Under **Agent Voice**, select **V3 Conversational** as the TTS model — this enables expressive mode
-4. Under **Advanced** settings, set the output audio format to `pcm_16000`
+4. Under **Advanced** settings, set the user input audio format to `pcm_16000`
 5. Copy the **Agent ID**
 
 <Warning>
-The `pcm_16000` format is required. Anam's audio passthrough expects raw PCM at 16 kHz. Other formats (mp3, opus) won't work.
+The user input audio format is configurable in ElevenLabs and must be set to `pcm_16000`. Anam's audio passthrough input is fixed at 16 kHz and cannot be changed — any other sample rate will produce garbled or silent audio.
 </Warning>
 
 ### Environment variables
@@ -283,7 +283,7 @@ await anamClient.streamToVideoElement("avatar-video");
 
 ### Setting up the audio input stream
 
-The audio input stream tells Anam what format to expect from the incoming audio chunks. This must match the ElevenLabs agent's output format: PCM 16-bit, 16 kHz, mono.
+The audio input stream declares the format of the chunks Elevenlabs sends to Anam, which currently is non-configurable and fixed to PCM 16-bit, 16 kHz, mono.
 
 ```typescript
 const audioInputStream = anamClient.createAgentAudioInputStream({
@@ -490,7 +490,7 @@ Interrupted messages render with an `[interrupted]` tag so the user can see wher
 ## Troubleshooting
 
 **No audio from the avatar / lips not moving**
-- Confirm the ElevenLabs agent output format is `pcm_16000`. Other formats (mp3, opus, different sample rates) are not compatible with Anam's audio passthrough.
+- Confirm the ElevenLabs agent user input audio format is set to `pcm_16000` in the ElevenLabs dashboard. Other input formats are not currently supported with Anam.
 - Check the browser console for errors from the Anam session token route.
 
 **Double audio (hearing speech twice)**
