@@ -64,7 +64,7 @@ Signed URLs (used in this example) default to WebSocket.
 - Node.js 18+
 - An [Anam](https://anam.ai) account and API key (sign up free at [lab.anam.ai](https://lab.anam.ai))
 - An [ElevenLabs](https://elevenlabs.io) account and API key
-- An ElevenLabs Conversational Agent configured with a V3 voice and `pcm_16000` user input audio format
+- An ElevenLabs Conversational Agent configured with a V3 voice
 
 ## Project Setup
 
@@ -83,11 +83,12 @@ Before setting up the app, create an agent in ElevenLabs:
 1. Go to [elevenlabs.io](https://elevenlabs.io) → **Agents** → **Create Agent**
 2. Configure the agent's system prompt and personality
 3. Under **Agent Voice**, select **V3 Conversational** as the TTS model — this enables expressive mode
-4. Under **Advanced** settings, set the user input audio format to `pcm_16000`
+4. Under **Advanced** settings, select an appropriate user input audio format for your application.
 5. Copy the **Agent ID**
 
 <Warning>
-The user input audio format is configurable in ElevenLabs and must be set to `pcm_16000`. Anam's audio passthrough input is fixed at 16 kHz and cannot be changed — any other sample rate will produce garbled or silent audio.
+The user input audio format is processed directly by the ElevenLabs SDK and does not go through Anam's backend. Any sample rate can be set here. 
+ElevenLabs audio output format (i.e. ElevenLabs TTS → Anam) is fixed to 16kHz PCM 16-bit mono. Therefore, the agentAudioInputStream needs to be set at pcm_s16le with sample rate 16000 and channels 1. 
 </Warning>
 
 ### Environment variables
@@ -281,12 +282,13 @@ const anamClient = createClient(sessionToken, {
 await anamClient.streamToVideoElement("avatar-video");
 ```
 
-### Setting up the audio input stream
+### Setting up the agent audio input stream
 
-The audio input stream declares the format of the chunks Elevenlabs sends to Anam, which currently is non-configurable and fixed to PCM 16-bit, 16 kHz, mono.
+The agent audio input stream declares the format of the TTS chunks ElevenLabs sends to Anam (agent → Anam). This is fixed to PCM 16-bit, 16 kHz, mono and is non-configurable in ElevenLabs.
+It is independent of the user input audio format set in ElevenLabs, which is the format used to ingest the user's microphone into ElevenLabs (user → ElevenLabs).
 
 ```typescript
-const audioInputStream = anamClient.createAgentAudioInputStream({
+const agentAudioInputStream = anamClient.createAgentAudioInputStream({
   encoding: "pcm_s16le",
   sampleRate: 16000,
   channels: 1,
@@ -305,7 +307,7 @@ const conversation = await Conversation.startSession({
     transcript.handleAudioChunk(base64Audio);
 
     if (anamReadyRef.current) {
-      audioInputStreamRef.current?.sendAudioChunk(base64Audio);
+      agentAudioInputStreamRef.current?.sendAudioChunk(base64Audio);
     } else {
       audioBufferRef.current.push(base64Audio);
     }
@@ -321,7 +323,7 @@ const conversation = await Conversation.startSession({
 
   onModeChange: ({ mode }: { mode: string }) => {
     if (mode === "listening") {
-      audioInputStreamRef.current?.endSequence();
+      agentAudioInputStreamRef.current?.endSequence();
       transcript.handleAgentDone();
     }
   },
@@ -359,7 +361,7 @@ Audio chunks can arrive from ElevenLabs before Anam's WebRTC connection is ready
 ```typescript
 anamClient.addListener(AnamEvent.SESSION_READY, () => {
   for (const chunk of audioBufferRef.current) {
-    audioInputStreamRef.current?.sendAudioChunk(chunk);
+    agentAudioInputStreamRef.current?.sendAudioChunk(chunk);
   }
   audioBufferRef.current = [];
   anamReadyRef.current = true;
