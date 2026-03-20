@@ -284,8 +284,11 @@ await anamClient.streamToVideoElement("avatar-video");
 
 ### Setting up the agent audio input stream
 
-The agent audio input stream declares the format of the TTS chunks ElevenLabs sends to Anam (agent → Anam). This is fixed to PCM 16-bit, 16 kHz, mono and is non-configurable in ElevenLabs.
-It is independent of the user input audio format set in ElevenLabs, which is the format used to ingest the user's microphone into ElevenLabs (user → ElevenLabs).
+The agent audio input stream declares the format of the TTS chunks ElevenLabs sends to Anam (agent → Anam). 
+
+<Warning>
+AgentAudioInputStream is fixed to PCM 16-bit, 16 kHz, mono and is non-configurable in ElevenLabs and is independent of the user input audio format set in ElevenLabs.
+</Warning>
 
 ```typescript
 const agentAudioInputStream = anamClient.createAgentAudioInputStream({
@@ -492,13 +495,13 @@ Interrupted messages render with an `[interrupted]` tag so the user can see wher
 ## Troubleshooting
 
 **No audio from the avatar / lips not moving**
-- Confirm the ElevenLabs agent user input audio format is set to `pcm_16000` in the ElevenLabs dashboard. Other input formats are not currently supported with Anam.
+- Confirm the ElevenLabs agent audio input format is set to `pcm_s16le`, sample rate 16000, channels 1
 - Check the browser console for errors from the Anam session token route.
 
 **Double audio (hearing speech twice)**
 - Make sure `conversation.setVolume({ volume: 0 })` is called after `startSession`. If the ElevenLabs speaker is not muted, audio plays from both ElevenLabs and the avatar.
 
-**Avatar video connects but no face appears**
+**Avatar drops the first few words of the welcome message**
 - Audio chunks may arrive before Anam's WebRTC connection is ready. The buffering logic in `SESSION_READY` handles this, but check that the listener is registered before calling `streamToVideoElement`.
 
 **Transcript text appears before the avatar speaks**
