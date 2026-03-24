@@ -80,5 +80,5 @@ The component handles:
 
 ## Learn more
 
-- [Anam Documentation](https://docs.anam.ai)
-- [JavaScript SDK Reference](https://docs.anam.ai/sdk/javascript)
+- [Anam Documentation](https://anam.ai/docs/overview)
+- [JavaScript SDK Reference](https://anam.ai/docs/overview)
