@@ -64,7 +64,7 @@ Signed URLs (used in this example) default to WebSocket.
 - Node.js 18+
 - An [Anam](https://anam.ai) account and API key (sign up free at [lab.anam.ai](https://lab.anam.ai))
 - An [ElevenLabs](https://elevenlabs.io) account and API key
-- An ElevenLabs Conversational Agent configured with a V3 voice
+- An ElevenLabs Conversational Agent configured with a V3 voice and `pcm_16000` output format
 
 ## Project Setup
 
@@ -83,12 +83,11 @@ Before setting up the app, create an agent in ElevenLabs:
 1. Go to [elevenlabs.io](https://elevenlabs.io) → **Agents** → **Create Agent**
 2. Configure the agent's system prompt and personality
 3. Under **Agent Voice**, select **V3 Conversational** as the TTS model — this enables expressive mode
-4. Under **Advanced** settings, select an appropriate user input audio format for your application.
+4. Under **Advanced** settings, set the output audio format to `pcm_16000`
 5. Copy the **Agent ID**
 
 <Warning>
-The user input audio format is processed directly by the ElevenLabs SDK and does not go through Anam's backend. Any sample rate can be set here. 
-ElevenLabs audio output format (i.e. ElevenLabs TTS → Anam) is fixed to 16kHz PCM 16-bit mono. Therefore, the agentAudioInputStream needs to be set at pcm_s16le with sample rate 16000 and channels 1. 
+The `pcm_16000` format is required. Anam's audio passthrough expects raw PCM at 16 kHz. Other formats (mp3, opus) won't work.
 </Warning>
 
 ### Environment variables
@@ -282,16 +281,12 @@ const anamClient = createClient(sessionToken, {
 await anamClient.streamToVideoElement("avatar-video");
 ```
 
-### Setting up the agent audio input stream
+### Setting up the audio input stream
 
-The agent audio input stream declares the format of the TTS chunks ElevenLabs sends to Anam (agent → Anam). 
-
-<Warning>
-AgentAudioInputStream is fixed to PCM 16-bit, 16 kHz, mono and is non-configurable in ElevenLabs and is independent of the user input audio format set in ElevenLabs.
-</Warning>
+The audio input stream tells Anam what format to expect from the incoming audio chunks. This must match the ElevenLabs agent's output format: PCM 16-bit, 16 kHz, mono.
 
 ```typescript
-const agentAudioInputStream = anamClient.createAgentAudioInputStream({
+const audioInputStream = anamClient.createAgentAudioInputStream({
   encoding: "pcm_s16le",
   sampleRate: 16000,
   channels: 1,
@@ -310,7 +305,7 @@ const conversation = await Conversation.startSession({
     transcript.handleAudioChunk(base64Audio);
 
     if (anamReadyRef.current) {
-      agentAudioInputStreamRef.current?.sendAudioChunk(base64Audio);
+      audioInputStreamRef.current?.sendAudioChunk(base64Audio);
     } else {
       audioBufferRef.current.push(base64Audio);
     }
@@ -326,7 +321,7 @@ const conversation = await Conversation.startSession({
 
   onModeChange: ({ mode }: { mode: string }) => {
     if (mode === "listening") {
-      agentAudioInputStreamRef.current?.endSequence();
+      audioInputStreamRef.current?.endSequence();
       transcript.handleAgentDone();
     }
   },
@@ -364,7 +359,7 @@ Audio chunks can arrive from ElevenLabs before Anam's WebRTC connection is ready
 ```typescript
 anamClient.addListener(AnamEvent.SESSION_READY, () => {
   for (const chunk of audioBufferRef.current) {
-    agentAudioInputStreamRef.current?.sendAudioChunk(chunk);
+    audioInputStreamRef.current?.sendAudioChunk(chunk);
   }
   audioBufferRef.current = [];
   anamReadyRef.current = true;
@@ -495,13 +490,13 @@ Interrupted messages render with an `[interrupted]` tag so the user can see wher
 ## Troubleshooting
 
 **No audio from the avatar / lips not moving**
-- Confirm the ElevenLabs agent audio input format is set to `pcm_s16le`, sample rate 16000, channels 1
+- Confirm the ElevenLabs agent output format is `pcm_16000`. Other formats (mp3, opus, different sample rates) are not compatible with Anam's audio passthrough.
 - Check the browser console for errors from the Anam session token route.
 
 **Double audio (hearing speech twice)**
 - Make sure `conversation.setVolume({ volume: 0 })` is called after `startSession`. If the ElevenLabs speaker is not muted, audio plays from both ElevenLabs and the avatar.
 
-**Avatar drops the first few words of the welcome message**
+**Avatar video connects but no face appears**
 - Audio chunks may arrive before Anam's WebRTC connection is ready. The buffering logic in `SESSION_READY` handles this, but check that the listener is registered before calling `streamToVideoElement`.
 
 **Transcript text appears before the avatar speaks**
