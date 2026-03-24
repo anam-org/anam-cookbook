@@ -1,0 +1,14 @@
+[project]
+name = "videosdk-anam-avatar"
+version = "0.1.0"
+description = "VideoSDK AI agents with Anam avatars (RealTime and Cascading pipelines)"
+requires-python = ">=3.12"
+dependencies = [
+    "videosdk-agents[google,openai,deepgram,elevenlabs,silero,turn-detector]",
+    "videosdk-plugins-anam",
+    "python-dotenv>=1.2.1",
+    "aiohttp",
+]
+
+[tool.uv]
+package = false
