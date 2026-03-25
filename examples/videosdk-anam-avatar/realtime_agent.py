@@ -5,7 +5,6 @@ Uses Gemini Live for low-latency voice and Anam for lip-synced avatar video.
 Run: uv run python realtime_agent.py
 """
 
-import asyncio
 import logging
 import os
 from dotenv import load_dotenv
@@ -30,8 +29,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
-
-logging.getLogger("anam").setLevel(logging.DEBUG)
 
 @function_tool
 async def get_weather(location: str):
@@ -88,7 +85,6 @@ class AnamVoiceAgent(Agent):
 
 
 async def start_session(context: JobContext):
-    print(os.getenv("VIDEOSDK_AUTH_TOKEN"))
     model = GeminiRealtime(
         model="gemini-2.5-flash-native-audio-preview-12-2025",
         config=GeminiLiveConfig(
