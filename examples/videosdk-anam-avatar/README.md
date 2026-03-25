@@ -6,7 +6,7 @@ This example shows how to add Anam lip-synced avatars to VideoSDK AI voice agent
 - **CascadingPipeline** (`cascading_agent.py`) - Uses Deepgram (STT), OpenAI (LLM), ElevenLabs (TTS)
 
 The cascading version shows clearly how all different pipeline components are sequenced and can be configured independently. 
-The RealTimePipeline is uses an "all-in-one" approach, and has a toolcalling example as well.
+The RealTimePipeline uses an "all-in-one" approach and has a tool-calling example as well.
 
 ## Prerequisites
 
