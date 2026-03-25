@@ -5,7 +5,8 @@ This example shows how to add Anam lip-synced avatars to VideoSDK AI voice agent
 - **RealTimePipeline** (`realtime_agent.py`) - Uses Gemini Live for low-latency, native audio
 - **CascadingPipeline** (`cascading_agent.py`) - Uses Deepgram (STT), OpenAI (LLM), ElevenLabs (TTS)
 
-If you're new to VideoSDK agents, start with `realtime_agent.py`. The cascading version is more configurable, but it has more moving pieces.
+The cascading version shows clearly how all different pipeline components are sequenced and can be configured independently. 
+The RealTimePipeline is uses an "all-in-one" approach, and has a toolcalling example as well.
 
 ## Prerequisites
 
