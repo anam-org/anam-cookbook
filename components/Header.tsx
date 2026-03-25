@@ -25,13 +25,13 @@ export function Header({ recipes = [] }: HeaderProps) {
           </Link>
           <nav className="flex items-center gap-4 text-sm">
             <Link
-              href="https://docs.anam.ai"
+              href="https://anam.ai/docs/overview"
               className="text-slate-900 dark:text-neutral-100 hover:text-slate-600 dark:hover:text-neutral-300 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none"
             >
               Docs
             </Link>
             <Link
-              href="https://docs.anam.ai/api-reference"
+              href="https://anam.ai/docs/overview"
               className="text-slate-900 dark:text-neutral-100 hover:text-slate-600 dark:hover:text-neutral-300 active:text-slate-950 dark:active:text-neutral-50 motion-safe:transition-colors motion-reduce:transition-none flex items-center gap-1"
             >
               API Reference

@@ -20,7 +20,7 @@ Some cookbook articles include working examples in the [`examples/`](examples/) 
 
 ## Additional resources
 
-- [Anam documentation](https://docs.anam.ai) - API reference and SDK documentation
+- [Anam documentation](https://anam.ai/docs/overview) - API reference and SDK documentation
 - [Anam Lab](https://lab.anam.ai) - Create personas, manage API keys, and monitor usage
 - [JavaScript SDK](https://github.com/anam-org/javascript-sdk) - Source code for the JavaScript SDK
 
