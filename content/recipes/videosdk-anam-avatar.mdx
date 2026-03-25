@@ -2,7 +2,7 @@
 title: Anam AI avatars with VideoSDK agents
 description: "Add real-time, lip-synced Anam avatars to your VideoSDK AI voice agents. Works with both RealTimePipeline and CascadingPipeline."
 tags: [python, videosdk, avatar, ai-agents, voice-assistant]
-date: 2026-03-19
+date: 2026-03-25
 authors: [sebvanleuven]
 ---
 
@@ -17,7 +17,7 @@ The complete code is at [examples/videosdk-anam-avatar](https://github.com/anam-
 A VideoSDK voice agent with an Anam avatar that:
 
 - Speaks with lip-synced facial animation
-- Works with either RealTimePipeline (Gemini Live) or CascadingPipeline (Deepgram + OpenAI + ElevenLabs)
+- Works with either RealTimePipeline (e.g. Gemini Live) or CascadingPipeline (e.g. STT + LLM + TTS, in this case Deepgram + OpenAI + ElevenLabs)
 - Supports function tools (e.g. weather lookup)
 - Greets the user on join and says goodbye on exit
 
@@ -130,11 +130,11 @@ pipeline = CascadingPipeline(
 )
 ```
 
-In this example, the TTS output goes to the avatar, which returns a lip-synced video stream (synchronized audio/video). Full example: [Anam Cascading Example on GitHub](https://github.com/videosdk-live/agents/blob/main/examples/avatar/anam_cascading_example.py).
+In this example, the TTS output goes to the avatar, which returns a lip-synced video stream (synchronized audio/video) that is published in your VideoSDK room. Full example: [Anam Cascading Example on GitHub](https://github.com/videosdk-live/agents/blob/main/examples/avatar/anam_cascading_example.py).
 
 ## RealTimePipeline (Gemini Live)
 
-RealTimePipeline uses native audio models like Gemini Live. Add the Anam avatar alongside your model:
+RealTimePipeline uses native audio models like Gemini Live. Add the Anam avatar alongside your model and the audio is forwarded direclty to Anam to render the avatar:
 
 ```python
 from videosdk.agents import Agent, AgentSession, RealTimePipeline, JobContext, RoomOptions, WorkerJob
@@ -217,7 +217,7 @@ async def get_weather(location: str):
     }
 ```
 
-The toolcall response pre-amble is more relevant when toolcalls require non-trivial amounts of time (e.g. fetching data from a database). To similuate this, can add a sleep inside the toolcall to simulate the delay.
+The toolcall response pre-amble is more relevant when toolcalls require non-trivial amounts of time (e.g. fetching data from a database). To simulate this, add a sleep inside the toolcall to delay the response:
 
 ```python
     await asyncio.sleep(10)
