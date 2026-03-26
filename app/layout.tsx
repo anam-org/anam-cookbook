@@ -7,6 +7,7 @@ import { ThemeProvider } from '@/components/ThemeProvider';
 import { PostHogProvider } from '@/components/PostHogProvider';
 import { PostHogPageView } from '@/components/PostHogPageView';
 import { Header } from '@/components/Header';
+import { attributionScript } from '@/lib/attributionScript';
 import { getAllRecipes } from '@/lib/recipes';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -83,6 +84,11 @@ export default function RootLayout({
                 } catch (e) {}
               })();
             `,
+          }}
+        />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: attributionScript,
           }}
         />
         <style
