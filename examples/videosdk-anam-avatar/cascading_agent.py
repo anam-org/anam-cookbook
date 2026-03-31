@@ -25,7 +25,6 @@ from videosdk.plugins.elevenlabs import ElevenLabsTTS
 from videosdk.plugins.openai import OpenAILLM
 from videosdk.plugins.silero import SileroVAD
 from videosdk.plugins.turn_detector import TurnDetector, pre_download_model
-from videosdk.plugins.google import GoogleLLM, GoogleTTS
 import logging
 
 logging.basicConfig(
