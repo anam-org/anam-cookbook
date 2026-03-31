@@ -1,5 +1,5 @@
 """
-VideoSDK RealTimePipeline agent with Anam avatar.
+VideoSDK RealTime (S2S) Pipeline agent with Anam avatar.
 
 Uses Gemini Live for low-latency voice and Anam for lip-synced avatar video.
 Run: uv run python realtime_agent.py
@@ -16,7 +16,7 @@ from videosdk.agents import (
     Agent,
     AgentSession,
     JobContext,
-    RealTimePipeline,
+    Pipeline,
     RoomOptions,
     WorkerJob,
     function_tool,
@@ -100,8 +100,8 @@ async def start_session(context: JobContext):
 
     session = AgentSession(
         agent=AnamVoiceAgent(),
-        pipeline=RealTimePipeline(
-            model=model,
+        pipeline=Pipeline(
+            llm=model,
             avatar=anam_avatar,
         ),
     )
