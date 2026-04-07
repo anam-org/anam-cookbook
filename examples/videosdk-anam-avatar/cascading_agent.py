@@ -1,5 +1,5 @@
 """
-VideoSDK CascadingPipeline agent with Anam avatar.
+VideoSDK Cascade Pipeline agent with Anam avatar.
 
 Uses Deepgram (STT), OpenAI (LLM), ElevenLabs (TTS), and Anam for lip-synced avatar video.
 Run: uv run python cascading_agent.py
@@ -14,8 +14,7 @@ load_dotenv(override=True)
 from videosdk.agents import (
     Agent,
     AgentSession,
-    CascadingPipeline,
-    ConversationFlow,
+    Pipeline,
     JobContext,
     RoomOptions,
     WorkerJob,
@@ -26,6 +25,13 @@ from videosdk.plugins.elevenlabs import ElevenLabsTTS
 from videosdk.plugins.openai import OpenAILLM
 from videosdk.plugins.silero import SileroVAD
 from videosdk.plugins.turn_detector import TurnDetector, pre_download_model
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
+)
 
 pre_download_model()
 
@@ -64,9 +70,8 @@ async def start_session(context: JobContext):
     )
 
     agent = AnamVoiceAgent()
-    conversation_flow = ConversationFlow(agent)
 
-    pipeline = CascadingPipeline(
+    pipeline = Pipeline(
         stt=stt,
         llm=llm,
         tts=tts,
@@ -78,7 +83,6 @@ async def start_session(context: JobContext):
     session = AgentSession(
         agent=agent,
         pipeline=pipeline,
-        conversation_flow=conversation_flow,
     )
 
     await session.start(wait_for_participant=True, run_until_shutdown=True)
