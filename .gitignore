@@ -37,7 +37,3 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
-
-# Local experiments
-examples/getstream-anam-avatar/
-examples/vision-agents-anam-social-campaign/
