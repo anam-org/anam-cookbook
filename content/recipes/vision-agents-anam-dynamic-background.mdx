@@ -96,7 +96,6 @@ ANAM_GREEN_BIAS=1.14
 ANAM_GREEN_TOLERANCE=22
 ANAM_GREEN_EDGE_EXPAND=1
 ```
-This is a good point to test if the setup is working. If all goes well, a getstream.io webpage should open and lands you immediately in a Stream call. The avatar should join the call and you should be able to have a conversation with the avatar.
 
 ## Avatar constraints
 
@@ -112,8 +111,16 @@ We found the following prompt works reliably:
 The generated avatar will popuplate the list and should look something like this:
 ![Generated avatar in the Anam Lab](/img/vision-agents-anam-dynamic-background/avatar-green-screen.png)
 
+This is a good point to test if the setup is working. If all goes well, a getstream.io webpage should open and lands you immediately in a Stream call. The avatar should join the call and you should be able to have a conversation with the avatar. 
+
+The avatar should show in a green background. Let's now change the backgrounds dynamically based on the context of the conversation. 
+
 ## Add dynamic backgrounds to the avatar
 
+The `AnamAvatarPublisher` receives the synchronized audio & video frames from Anam's backend and forwards them to the end-user over the
+ `getstream.Edge()`. We'll intercept the video frames here and apply the background image to the frame.
+
+ 
 The main change is a custom processor that subclasses `AnamAvatarPublisher` and overrides frame handling:
 
 ```python
@@ -123,6 +130,7 @@ class SceneAwareAnamAvatarPublisher(AnamAvatarPublisher):
             composited = await self._apply_background(frame)
             await self._sync.write_video(composited)
 ```
+The composited frame (the frame with the background image applied) is now pushed into the video track.
 
 Inside `_apply_background`, the flow is:
 
@@ -130,6 +138,10 @@ Inside `_apply_background`, the flow is:
 - Build a strict + tolerant near-green mask
 - Replace masked pixels with the current scene image
 - Write the composited frame back to the published video track
+
+
+The `_apply_background` method is simple implementation and serves as an example of how custom post-processing can be applied. 
+It's not suggested as a production ready implementation, but it's a good starting point for customizing the avatar behavior.
 
 ## Change the scene based on tool calls
 
@@ -212,8 +224,12 @@ You'll see the avatar switch to the kitchen scene for cooking instructions and t
 ![Anam Avatar switching to the studio scene for weather requests and the](/img/vision-agents/vision-agent-stream-call-with-avatar.png)
 
 
-## Why this recipe is useful
+## Use cases 
 
-- It teaches core Vision Agents concepts (`Agent`, `processors`, function tools)
-- It shows a practical media customization pattern (chroma-key compositing)
-- It stays close to production behavior without turning into a large framework project
+Any Vision Agents pipeline can now benefit by uplifting the voice agents to full fledged avatar agents. 
+The recipe shows that toocalling and avatars work hand-in-hand. 
+Furthermore, complex media processing operations are supported and allow for fine grain customizations to increase the engagement with your customer.
+
+
+Docs: [Vision Agents](https://visionagents.ai), [Anam](https://docs.anam.ai).
+

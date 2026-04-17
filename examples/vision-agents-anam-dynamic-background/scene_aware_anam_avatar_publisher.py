@@ -160,11 +160,24 @@ class SceneAwareAnamAvatarPublisher(AnamAvatarPublisher):
             raise ValueError(f"Background directory does not exist: {background_dir}")
 
         backgrounds: dict[str, Image.Image] = {}
+        background_sources: dict[str, Path] = {}
         for image_path in sorted(background_dir.glob("*")):
             if image_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
                 continue
-            scene_name = image_path.stem.lower()
+
+            # Keep loader keys aligned with set_scene normalization so filenames
+            # like "home-office.jpg" or "home office.jpg" are addressable.
+            scene_name = self._normalize_scene(image_path.stem)
+            existing_source = background_sources.get(scene_name)
+            if existing_source is not None:
+                raise ValueError(
+                    "Background scene name collision after normalization for "
+                    f"'{existing_source.stem}' and '{image_path.stem}'. "
+                    f"Both map to '{scene_name}'. Rename one background file."
+                )
+
             backgrounds[scene_name] = Image.open(image_path)
+            background_sources[scene_name] = image_path
 
         if not backgrounds:
             raise ValueError(
