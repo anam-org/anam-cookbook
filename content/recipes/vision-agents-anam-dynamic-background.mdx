@@ -166,7 +166,11 @@ async def get_weather(location: str) -> dict[str, object]:
 To push this a bit further, we can also inspect the transcript to infer the scene and set the scene based on hints in the transcript.
 We achieve this by subscribing to the `STTTranscriptEvent` on_transcript callback and inspecting the transcript text.
 
+Since `STTTranscriptEvent` does not carry a participant field, we track whose turn is active via `TurnStartedEvent` and only infer scenes from user speech. Without this guard the avatar would switch backgrounds based on the agent's own responses.
+
 ```python
+from vision_agents.core.turn_detection import TurnStartedEvent
+
 def _infer_scene_from_request(text: str) -> str | None:
     normalized = text.strip().lower()
     if any(k in normalized for k in ("cook", "recipe", "dish", "meal")):
@@ -175,27 +179,27 @@ def _infer_scene_from_request(text: str) -> str | None:
         return "studio"
     return None
 
+is_user_turn = False
+
+@agent.events.subscribe
+async def on_turn_started(event: TurnStartedEvent) -> None:
+    nonlocal is_user_turn
+    if event.participant is None or event.participant.user_id == agent.agent_user.id:
+        is_user_turn = False
+        return
+    is_user_turn = True
+    await avatar.reset_scene()
+
 @agent.events.subscribe
 async def on_transcript(event: STTTranscriptEvent) -> None:
-    inferred = _infer_scene_from_request(event.text or "")
+    if not is_user_turn or event.text is None:
+        return
+    inferred = _infer_scene_from_request(event.text)
     if inferred is not None:
         await avatar.set_scene(inferred)
 ```
 
-## Revert to neutral with turn-taking callbacks
-
-For this simple example, we'll revert to the neutral scene when the user starts the next turn, which we can get from the Vision Agents turn lifecycle events. Subscribe to `TurnStartedEvent` and reset the background when the user starts the next turn:
-
-```python
-from vision_agents.core.turn_detection import TurnStartedEvent
-
-@agent.events.subscribe
-async def on_turn_started(event: TurnStartedEvent) -> None:
-    if event.participant and event.participant.user_id != agent.agent_user.id:
-        await avatar.reset_scene()
-```
-
-This keeps transitions predictable: hold the contextual scene during the assistant response, then return to neutral on the next user turn.
+The `on_turn_started` handler doubles as the neutral-scene reset: when a user turn begins, the background reverts to the base scene, then the transcript handler may switch it to a contextual scene as speech arrives.
 
 ## Running the app
 

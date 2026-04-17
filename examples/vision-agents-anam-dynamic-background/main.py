@@ -164,22 +164,26 @@ async def join_call(agent: Agent, call_type: str, call_id: str, **kwargs) -> Non
         )
 
     if avatar is not None:
+        is_user_turn = False
+
+        @agent.events.subscribe
+        async def on_turn_started(event: TurnStartedEvent) -> None:
+            nonlocal is_user_turn
+            participant = event.participant
+            if participant is None or participant.user_id == agent.agent_user.id:
+                is_user_turn = False
+                return
+            is_user_turn = True
+            await avatar.reset_scene()
 
         @agent.events.subscribe
         async def on_transcript(event: STTTranscriptEvent) -> None:
-            if event.text is None:
+            if not is_user_turn or event.text is None:
                 return
 
             inferred = _infer_scene_from_request(event.text)
             if inferred is not None:
                 await avatar.set_scene(inferred)
-
-        @agent.events.subscribe
-        async def on_turn_started(event: TurnStartedEvent) -> None:
-            participant = event.participant
-            if participant is None or participant.user_id == agent.agent_user.id:
-                return
-            await avatar.reset_scene()
 
     async with agent.join(call):
         await agent.simple_response(
