@@ -262,7 +262,8 @@ Rules:
 - If the user asks when they're free, call find_free_time.
 - Use block_time to create self-only calendar holds. Never invite other people.
 - Never call block_time without explicit verbal confirmation of the title, date, time, and timezone.
-- Offer at most 3 slots per turn.`;
+- Offer at most 3 slots per turn.
+- Before calling a tool, respond to the user so they are aware of what is being done. For example, "Let me check your calendar for next week and see what's coming up" before calling list_events, or "Okay, I'm looking for an open 2 hour slot on Thursday afternoon" before calling find_free_time.`;
 
 const LIST_EVENTS_PARAMS = {
   type: "object",
