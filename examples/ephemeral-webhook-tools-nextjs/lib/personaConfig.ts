@@ -96,6 +96,8 @@ export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
         url: listEventsUrl,
         method: "POST",
         parameters: LIST_EVENTS_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
       },
       {
         type: "server",
@@ -106,6 +108,8 @@ export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
         url: freebusyUrl,
         method: "POST",
         parameters: FIND_FREE_TIME_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
       },
       {
         type: "server",
@@ -116,6 +120,8 @@ export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
         url: eventsUrl,
         method: "POST",
         parameters: BLOCK_TIME_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
       },
     ],
   };

@@ -241,6 +241,8 @@ Three deliberate choices worth calling out:
 
 This is the heart of the "ephemeral" pattern. The persona — avatar, voice, LLM, system prompt, tools — is declared inline and constructed fresh per session, with freshly-signed URLs. Note how the tools are referenced in the system prompt and how the persona is guided around handling spoken text and asking for confirmation before finalising tool calls.
 
+N.B. we set awaitResponse with disableInterruptions in the tool config to force the persona to wait for tools to respond before continuing with the conversation.
+
 `lib/personaConfig.ts`:
 
 ```ts
@@ -322,6 +324,8 @@ export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
         url: sign("/api/calendar/list-events"),
         method: "POST",
         parameters: LIST_EVENTS_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
       },
       {
         type: "server",
@@ -332,6 +336,8 @@ export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
         url: sign("/api/calendar/freebusy"),
         method: "POST",
         parameters: FIND_FREE_TIME_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
       },
       {
         type: "server",
@@ -342,6 +348,8 @@ export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
         url: sign("/api/calendar/events"),
         method: "POST",
         parameters: BLOCK_TIME_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
       },
     ],
   };
