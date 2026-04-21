@@ -15,6 +15,9 @@ export const metadata: Metadata = {
   title: 'Anam Cookbook: AI Avatar Tutorials & Integration Guides',
   description: 'Tutorials and code examples for building with real-time AI avatars. Integrate Anam with Next.js, LiveKit, ElevenLabs, Python, Shopify, and more.',
   metadataBase: new URL('https://anam.ai/cookbook'),
+  alternates: {
+    canonical: 'https://anam.ai/cookbook',
+  },
   openGraph: {
     title: 'Anam Cookbook: AI Avatar Tutorials & Integration Guides',
     description: 'Tutorials and code examples for building with real-time AI avatars. Integrate Anam with Next.js, LiveKit, ElevenLabs, Python, Shopify, and more.',
