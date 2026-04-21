@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCalendarClient } from "@/lib/calendar";
+import { getSessionUserId } from "@/lib/session";
 
 export async function GET(req: NextRequest) {
-  const userId = req.cookies.get("userId")?.value;
+  const userId = getSessionUserId(req);
   if (!userId) {
     return NextResponse.json({ error: "not signed in" }, { status: 401 });
   }
