@@ -43,5 +43,5 @@ When you run the agent, a **playground URL** is printed in the terminal. Open th
 ## See also
 
 - [VideoSDK Anam plugin docs](https://docs.videosdk.live/ai_agents/plugins/avatar/anam-ai)
-- [Anam AI docs](https://docs.anam.ai)
+- [Anam AI docs](https://anam.ai/docs)
 - [Cookbook recipe](../../content/recipes/videosdk-anam-avatar.mdx)
