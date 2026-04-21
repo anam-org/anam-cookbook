@@ -10,6 +10,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "missing code" }, { status: 400 });
   }
 
+  const returnedState = req.nextUrl.searchParams.get("state");
+  const expectedState = req.cookies.get("oauth_state")?.value;
+  if (!returnedState || !expectedState || returnedState !== expectedState) {
+    return NextResponse.json({ error: "invalid state" }, { status: 400 });
+  }
+
   const oauth2Client = createOAuthClient();
   const { tokens } = await oauth2Client.getToken(code);
 
@@ -45,5 +51,6 @@ export async function GET(req: NextRequest) {
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
+  res.cookies.set("oauth_state", "", { path: "/", maxAge: 0 });
   return res;
 }

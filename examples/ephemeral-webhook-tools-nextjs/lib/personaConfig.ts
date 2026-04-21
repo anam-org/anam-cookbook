@@ -1,6 +1,6 @@
 import { presignUrl } from "./presign";
 
-const SYSTEM_PROMPT = `You are Alex, a scheduling assistant. You help the user see what's on their calendar and block out time for themselves.
+const buildSystemPrompt = () => `You are Alex, a scheduling assistant. You help the user see what's on their calendar and block out time for themselves.
 
 Today is ${new Date().toDateString()}. When the user refers to days like "Friday" or "next week", resolve them relative to today.
 
@@ -16,7 +16,7 @@ Rules:
 - Use block_time to create self-only calendar holds ("block an hour tomorrow morning", "put focus time in my calendar Friday"). Never invite other people.
 - Never call block_time without explicit verbal confirmation of the title, date, time, and timezone.
 - Offer at most 3 slot options per turn.
-- After creating a hold, end with a short spoken summary like "I've blocked focus time for Tuesday at 2pm.
+- After creating a hold, end with a short spoken summary like "I've blocked focus time for Tuesday at 2pm".
 - Before calling a tool, respond to the user so they are aware of what is being done. For example, "Let me check your calendar for next week and see what's coming up" before calling list_events, or "Okay, I'm looking for an open 2 hour slot on Thursday afternoon" before calling find_free_time.`;
 
 const FIND_FREE_TIME_PARAMS = {
@@ -86,7 +86,7 @@ export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
     avatarId: process.env.ANAM_AVATAR_ID,
     voiceId: process.env.ANAM_VOICE_ID,
     llmId: process.env.ANAM_LLM_ID,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: buildSystemPrompt(),
     tools: [
       {
         type: "server",
