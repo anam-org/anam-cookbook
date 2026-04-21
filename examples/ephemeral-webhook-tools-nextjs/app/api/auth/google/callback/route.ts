@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "crypto";
+import { randomUUID, timingSafeEqual } from "crypto";
 import { google } from "googleapis";
 import { createOAuthClient } from "@/lib/calendar";
 import { saveTokenRecord } from "@/lib/tokenStore";
 
 export async function GET(req: NextRequest) {
+  const storedState = req.cookies.get("oauth_state")?.value;
+  const returnedState = req.nextUrl.searchParams.get("state");
+
+  if (
+    !storedState ||
+    !returnedState ||
+    !timingSafeEqual(Buffer.from(storedState), Buffer.from(returnedState))
+  ) {
+    return NextResponse.json(
+      { error: "invalid or missing OAuth state" },
+      { status: 403 },
+    );
+  }
+
   const code = req.nextUrl.searchParams.get("code");
   if (!code) {
     return NextResponse.json({ error: "missing code" }, { status: 400 });
@@ -45,5 +59,6 @@ export async function GET(req: NextRequest) {
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
+  res.cookies.delete("oauth_state");
   return res;
 }
