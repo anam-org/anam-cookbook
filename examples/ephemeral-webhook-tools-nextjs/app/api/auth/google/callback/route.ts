@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { google } from "googleapis";
 import { createOAuthClient } from "@/lib/calendar";
 import { saveTokenRecord } from "@/lib/tokenStore";
+import { signUserId } from "@/lib/sessionCookie";
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
@@ -45,9 +46,10 @@ export async function GET(req: NextRequest) {
   });
 
   const res = NextResponse.redirect(new URL("/", req.url));
-  res.cookies.set("userId", userId, {
+  res.cookies.set("userId", signUserId(userId), {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
