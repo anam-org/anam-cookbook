@@ -30,6 +30,9 @@ export async function generateMetadata({ params }: TopicPageProps) {
   return {
     title,
     description,
+    alternates: {
+      canonical: url,
+    },
     openGraph: {
       title,
       description,
