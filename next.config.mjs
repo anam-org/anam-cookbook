@@ -1,14 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   basePath: '/cookbook',
-  // Serve assets from the canonical host on production so the HTML doesn't
-  // reference anam-cookbook.vercel.app (weakens the canonical signal and
-  // shows the origin host to crawlers). Preview deploys and local dev use
-  // the default so assets load from the host the page is served from.
-  assetPrefix:
-    process.env.VERCEL_ENV === 'production'
-      ? 'https://anam.ai/cookbook'
-      : undefined,
+  // Do NOT set assetPrefix. Setting it (even conditionally for production)
+  // causes Vercel to stop emitting the ?dpl=dpl_... deployment-pinning
+  // query param on asset URLs. During a deploy the edge propagation
+  // window leaves cached HTML pointing at new-hash assets while the
+  // Vercel CDN is still serving the previous deployment — without dpl_,
+  // those asset requests 404 instead of resolving to the correct build.
+  // The origin-host leak in _next/static URLs is a weaker SEO signal
+  // than the deploy-safety cost of removing deployment pinning.
   async redirects() {
     return [
       {
