@@ -1,0 +1,553 @@
+---
+title: Handling user authentication with webhook tools
+description: "Learn how to give your AI avatar agent the ability to call webhook tools securely via a user specific pre-signed URL"
+tags: [tools, javascript, agents]
+date: 2026-04-20
+authors: [sr-anam]
+---
+
+# Ephemeral webhook tools with per-session signed URLs
+
+When an Anam agent calls a tool, the request comes from Anam's server — not the user's browser. That means the usual authentication moves (cookies, `Authorization` headers, session context) all disappear. You still need the webhook to act as the right user, with the right permissions, against the right downstream API.
+
+This cookbook builds a voice agent that reads the signed-in user's Google Calendar and blocks out time for them. Every tool URL is defined inline at session-token time and HMAC-signed with the `userId` baked in, so each webhook request arrives already authenticated — no bearer tokens, no request-body lookups, no shared secrets between calls.
+
+## What you'll build
+
+A Next.js app where the user signs in with Google once (we store the refresh token server-side), starts a conversation, and the avatar can answer *"what's on my calendar?"* or *"block an hour for focus time tomorrow"* out loud. Your server mints an Anam session token with an ephemeral persona defined inline — avatar, voice, LLM, system prompt, and three webhook tools, each with a short-lived signed URL unique to this user and this session. Nothing about the persona is persisted in the Anam Lab. When Anam invokes a tool, your handler verifies the signature, pulls out the `userId`, loads that user's Google refresh token, and talks to Google Calendar.
+
+This example is kept relatively minimal and focuses on the Anam avatar setup, to see a full example with a more fleshed out UI and google oauth support see the example project [examples/ephemeral-webhook-tools-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/ephemeral-webhook-tools-nextjs).
+
+## Prerequisites
+
+- Node 20+
+- An [Anam account](https://lab.anam.ai) and API key
+- A Google Cloud OAuth 2.0 client (Web application) with the Google Calendar API enabled and `http://localhost:3000/api/auth/google/callback` as an authorized redirect URI and enabled scopes `.../auth/userinfo.email`, `.../auth/calendar.events`.
+
+You'll also need avatar, voice, and LLM IDs for the persona config. Grab them with your API key:
+
+```bash
+export ANAM_API_KEY=...
+
+curl -H "Authorization: Bearer $ANAM_API_KEY" https://api.anam.ai/v1/avatars | jq '.data[0].id'
+curl -H "Authorization: Bearer $ANAM_API_KEY" https://api.anam.ai/v1/voices  | jq '.data[0].id'
+curl -H "Authorization: Bearer $ANAM_API_KEY" https://api.anam.ai/v1/llms    | jq '.data[0].id'
+```
+
+Pick what fits your use case and keep the IDs handy for `.env.local` below.
+
+## Why ephemeral tools?
+
+Anam supports two ways to attach tools to a persona. A **Lab-configured persona** has its tools saved on the persona record: the URLs are fixed at persona creation, and user identity has to travel in the request body and be re-verified every call. An **ephemeral persona** defines the full tool list inline in the session-token request, so the URLs can change every session and user identity can be baked into the URL itself.
+
+For a per-user agent, ephemeral tools are a natural fit: the URL *is* the auth. No header parsing, no token lookup by body field, no shared bearer secret that every call reuses.
+
+## Why signed URLs?
+
+The webhook call originates from Anam's server, not the user's browser, so you have no cookie and no `Authorization` header to lean on. You still need to know which user the call is for — otherwise you can't load their Google refresh token.
+
+The obvious fix is to embed `userId` in the URL. But plaintext `?uid=user_123` is trivially forgeable: anyone who sees a URL can swap the uid and act as any user. HMAC-signing the URL gives you three properties for free — **user scoping** (tampering with `uid` breaks the sig), **endpoint scoping** (a `/freebusy` URL can't be replayed against `/events`), and **time bounding** (URLs expire without a revocation store). Verification is stateless; you just need a shared `PRESIGN_SECRET` on the server.
+
+---
+
+## Project setup
+
+```bash
+npx create-next-app@latest calendar-agent --typescript --app --eslint --tailwind
+cd calendar-agent
+npm install @anam-ai/js-sdk googleapis
+```
+
+Create `.env.local`:
+
+```
+# Anam
+ANAM_API_KEY=
+ANAM_AVATAR_ID=
+ANAM_VOICE_ID=
+ANAM_LLM_ID=
+
+# Google OAuth
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
+
+# Webhook signing
+PUBLIC_BASE_URL=http://localhost:3000
+PRESIGN_SECRET=
+```
+
+Generate a strong `PRESIGN_SECRET`:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+`PUBLIC_BASE_URL` must be a URL Anam can reach. For local development, expose port 3000 via a tunnel (`ngrok http 3000`, `cloudflared tunnel`, `tailscale funnel`, etc.) and set `PUBLIC_BASE_URL` and `GOOGLE_REDIRECT_URI` to the public URL.
+
+---
+
+## The presign utility
+
+This is the heart of the integration. One module exports both the signer (used at session-token time) and the verifier (used in every webhook handler). If you are using a webhook service that supports presigned urls natively you can replace this with a function to generate the presigned url.
+
+`lib/presign.ts`:
+
+```ts
+import { createHmac, timingSafeEqual } from "crypto";
+
+function secret(): string {
+  const s = process.env.PRESIGN_SECRET;
+  if (!s) throw new Error("PRESIGN_SECRET not set");
+  return s;
+}
+
+export function presignUrl(
+  baseUrl: string,
+  userId: string,
+  expiresInSeconds = 3600,
+  exp?: number,
+): string {
+  const expTs = exp ?? Math.floor(Date.now() / 1000) + expiresInSeconds;
+  const payload = `${baseUrl}|${userId}|${expTs}`;
+  const sig = createHmac("sha256", secret()).update(payload).digest("hex");
+  return `${baseUrl}?uid=${encodeURIComponent(userId)}&exp=${expTs}&sig=${sig}`;
+}
+
+export function verifyPresignedUrl(
+  baseUrl: string,
+  uid: string | null,
+  exp: string | null,
+  sig: string | null,
+): string {
+  if (!uid || !exp || !sig) throw new Error("Missing presign params");
+  if (Math.floor(Date.now() / 1000) > Number(exp)) throw new Error("URL expired");
+
+  const payload = `${baseUrl}|${uid}|${exp}`;
+  const expected = createHmac("sha256", secret()).update(payload).digest("hex");
+
+  const sigBuf = Buffer.from(sig, "hex");
+  const expBuf = Buffer.from(expected, "hex");
+  if (sigBuf.length !== expBuf.length) throw new Error("Invalid signature");
+  if (!timingSafeEqual(sigBuf, expBuf)) throw new Error("Invalid signature");
+
+  return uid;
+}
+```
+
+Two things to note:
+
+- The `exp` parameter on `presignUrl` lets the caller pin all tool URLs for a session to the **same** expiry, so they all expire together.
+- `timingSafeEqual` prevents an attacker from inferring the correct signature by measuring response-time differences.
+
+A small helper keeps webhook routes clean. `lib/webhookAuth.ts`:
+
+```ts
+import { NextRequest } from "next/server";
+import { verifyPresignedUrl } from "./presign";
+
+export function authenticateWebhook(req: NextRequest, routePath: string): string {
+  const base = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
+  if (!base) throw new Error("PUBLIC_BASE_URL not set");
+  const baseUrl = `${base}${routePath}`;
+
+  const params = req.nextUrl.searchParams;
+  return verifyPresignedUrl(
+    baseUrl,
+    params.get("uid"),
+    params.get("exp"),
+    params.get("sig"),
+  );
+}
+```
+
+Every webhook handler will start with one line: `const userId = authenticateWebhook(req, "/api/...")`.
+
+---
+
+## Getting user credentials on the server
+
+The webhook handlers need a `userId → refresh_token` mapping. How you populate it is standard Google OAuth and not the point of this cookbook: `/api/auth/google` starts the consent flow, `/api/auth/google/callback` exchanges the code and stores the refresh token keyed by the user's email (which doubles as `userId`), and sets a `userId` cookie. Three details worth naming, because they bite everyone:
+
+- Request `access_type: "offline"` **and** `prompt: "consent"` on the auth URL. Without both, returning users only get an access token and you'll be unable to act on their behalf server-side.
+- Persist *only* the refresh token. The `googleapis` client refreshes access tokens automatically from it.
+- Generate a random `state` value on `/api/auth/google`, stash it in a short-lived HttpOnly cookie, and require the callback to match it before exchanging the code — otherwise the flow is open to OAuth CSRF.
+
+For development, a JSON file keyed by userId is fine — the example repo ships one. For anything real, use a database with encryption at rest; see [Security properties](#security-properties).
+
+After this flow you have a `userId` cookie in the browser and a refresh token on the server. `userId` is what gets baked into every signed webhook URL.
+
+---
+
+## Writing a webhook handler
+
+Every webhook handler has the same four-step shape:
+
+1. `authenticateWebhook(req, routePath)` — verify the sig, return `userId`, or 401.
+2. Parse the tool arguments from the body.
+3. Load whatever downstream credentials you need, keyed by `userId`.
+4. Call the upstream API and return a compact, LLM-friendly JSON response — stable keys, short strings. Anam's LLM reads the response verbatim when deciding what to say next.
+
+Here's `block_time` — a self-only calendar hold — in `app/api/calendar/events/route.ts`:
+
+```ts
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateWebhook } from "@/lib/webhookAuth";
+import { getCalendarClient } from "@/lib/calendar";
+
+export async function POST(req: NextRequest) {
+  let userId: string;
+  try {
+    userId = authenticateWebhook(req, "/api/calendar/events");
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 401 });
+  }
+
+  const { title, start, end, timezone, notes } = await req.json();
+  if (!title || !start || !end || !timezone) {
+    return NextResponse.json({ error: "invalid params" }, { status: 400 });
+  }
+
+  const calendar = await getCalendarClient(userId);
+  const { data: event } = await calendar.events.insert({
+    calendarId: "primary",
+    requestBody: {
+      summary: title,
+      description: notes,
+      start: { dateTime: start, timeZone: timezone },
+      end: { dateTime: end, timeZone: timezone },
+      transparency: "opaque",
+    },
+  });
+
+  return NextResponse.json({ eventId: event.id, htmlLink: event.htmlLink });
+}
+```
+
+`getCalendarClient(userId)` is a three-line wrapper around `googleapis` that pulls the user's refresh token and returns a ready client — see the example repo for the implementation.
+
+### A read tool: `list_events`
+
+Same shape, different upstream call. `list_events` queries `calendar.events.list` on `primary` with a window that defaults to `now → +7d` if the model doesn't specify one, and caps `max_results` at 50. The response is a flattened array of `{ id, title, start, end, timezone, attendees, allDay }` — just the fields the LLM might reason about.
+
+Three deliberate choices worth calling out:
+
+- **Flatten the upstream shape.** Google's `events.list` returns `creator`, `organizer`, `iCalUID`, reminders, extended properties, and more. The model doesn't need any of it, and tokens for fields the model won't use are pure waste. Project down.
+- **Fold defaults in the handler, not the schema.** Making `window_start` / `window_end` optional and defaulting server-side means the model can call `list_events` with no arguments on a vague prompt like *"what's next?"* and still get a useful answer.
+- **Cap `max_results`.** Otherwise the model occasionally asks for 1000 events and blows through the response budget.
+
+---
+
+## The ephemeral persona config
+
+This is the heart of the "ephemeral" pattern. The persona — avatar, voice, LLM, system prompt, tools — is declared inline and constructed fresh per session, with freshly-signed URLs. Note how the tools are referenced in the system prompt and how the persona is guided around handling spoken text and asking for confirmation before finalising tool calls.
+
+N.B. we set awaitResponse with disableInterruptions in the tool config to force the persona to wait for tools to respond before continuing with the conversation.
+
+`lib/personaConfig.ts`:
+
+```ts
+import { presignUrl } from "./presign";
+
+const buildSystemPrompt = () => `You are Alex, a scheduling assistant. You help the user see what's on their calendar and block out time for themselves.
+Today is ${new Date().toDateString()}.
+
+Output format:
+- Everything you say is spoken aloud by TTS. Output only words that should be spoken.
+- No markdown, lists, bullets, headings, code blocks, emoji, or stage directions.
+- Use only sentence punctuation: periods, commas, question marks. Avoid semicolons, colons, dashes, ellipses.
+- Never read out ISO timestamps, URLs, or raw JSON. Convert times to natural speech like "Tuesday at 2pm".
+
+Rules:
+- If the user asks about their own schedule, call list_events.
+- If the user asks when they're free, call find_free_time.
+- Use block_time to create self-only calendar holds. Never invite other people.
+- Never call block_time without explicit verbal confirmation of the title, date, time, and timezone.
+- Offer at most 3 slots per turn.
+- Before calling a tool, respond to the user so they are aware of what is being done. For example, "Let me check your calendar for next week and see what's coming up" before calling list_events, or "Okay, I'm looking for an open 2 hour slot on Thursday afternoon" before calling find_free_time.`;
+
+const LIST_EVENTS_PARAMS = {
+  type: "object",
+  properties: {
+    window_start: { type: "string", description: "ISO 8601 start. Defaults to now." },
+    window_end: { type: "string", description: "ISO 8601 end. Defaults to 7 days from now." },
+    max_results: { type: "number", description: "1–50. Defaults to 10." },
+    timezone: { type: "string", description: "IANA timezone" },
+  },
+  required: [],
+} as const;
+
+const FIND_FREE_TIME_PARAMS = {
+  type: "object",
+  properties: {
+    window_start: { type: "string", description: "ISO 8601 start of search window" },
+    window_end: { type: "string", description: "ISO 8601 end of search window" },
+    duration_minutes: { type: "number", description: "Required block length in minutes" },
+    timezone: { type: "string", description: "IANA timezone" },
+  },
+  required: ["window_start", "window_end", "duration_minutes"],
+} as const;
+
+const BLOCK_TIME_PARAMS = {
+  type: "object",
+  properties: {
+    title: { type: "string", description: "Short label, e.g. 'Focus time'" },
+    start: { type: "string", description: "ISO 8601 datetime" },
+    end: { type: "string", description: "ISO 8601 datetime" },
+    timezone: { type: "string", description: "IANA timezone" },
+    notes: { type: "string" },
+  },
+  required: ["title", "start", "end", "timezone"],
+} as const;
+
+export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
+  const base = (process.env.PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
+  if (!base) throw new Error("PUBLIC_BASE_URL not set");
+
+  // Single expiry shared across all tool URLs for this session.
+  const exp = Math.floor(Date.now() / 1000) + expiresInSeconds;
+
+  const sign = (path: string) =>
+    presignUrl(`${base}${path}`, userId, expiresInSeconds, exp);
+
+  return {
+    name: "Alex",
+    avatarId: process.env.ANAM_AVATAR_ID,
+    voiceId: process.env.ANAM_VOICE_ID,
+    llmId: process.env.ANAM_LLM_ID,
+    systemPrompt: buildSystemPrompt(),
+    tools: [
+      {
+        type: "server",
+        subtype: "webhook",
+        name: "list_events",
+        description:
+          "Fetch the user's own upcoming calendar events. Call when the user asks what's on their calendar or to summarise their schedule.",
+        url: sign("/api/calendar/list-events"),
+        method: "POST",
+        parameters: LIST_EVENTS_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
+      },
+      {
+        type: "server",
+        subtype: "webhook",
+        name: "find_free_time",
+        description:
+          "Find open slots on the user's own calendar of at least `duration_minutes`. Call before offering times to block out.",
+        url: sign("/api/calendar/freebusy"),
+        method: "POST",
+        parameters: FIND_FREE_TIME_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
+      },
+      {
+        type: "server",
+        subtype: "webhook",
+        name: "block_time",
+        description:
+          "Create a self-only calendar event (no attendees) to block out time for the user. Only call after they have explicitly confirmed title, time, and date.",
+        url: sign("/api/calendar/events"),
+        method: "POST",
+        parameters: BLOCK_TIME_PARAMS,
+        awaitResponse: true,
+        disableInterruptions: true,
+      },
+    ],
+  };
+}
+```
+
+Two things worth noticing:
+
+- **The tool name is for the model, the path is for you.** `find_free_time` reads naturally in a system prompt and LLM trace; the route is still `/api/calendar/freebusy` because that's what it *is* under the hood. Decouple them and name each for its audience.
+- **`required` shrinks on purpose.** `list_events` requires nothing so the model can call it with no arguments on vague prompts. `block_time` doesn't require `notes` because most holds don't need them. Every optional parameter is one fewer thing the model can hallucinate.
+
+Each `tools[]` entry has:
+
+- `type: "server"`, `subtype: "webhook"` — marks it as a server-side webhook tool (Anam invokes the URL itself; the browser never sees it).
+- `url` — the full, signed URL. Query string is preserved through to your handler.
+- `method: "POST"` — Anam posts the tool arguments as JSON.
+- `parameters` — a JSON Schema describing the arguments. This is the contract the LLM reasons over when deciding what to pass.
+
+Crucially, nothing about this persona is persisted in the Anam Lab. It exists only for the lifetime of this session token.
+
+---
+
+## The session-token route
+
+The browser calls this to start a conversation. It's where `userId` (from the cookie), the persona config (with signed URLs), and Anam's session-token API come together.
+
+`app/api/session-token/route.ts`:
+
+```ts
+import { NextRequest, NextResponse } from "next/server";
+import { buildPersonaConfig } from "@/lib/personaConfig";
+
+export async function POST(req: NextRequest) {
+  const userId = req.cookies.get("userId")?.value;
+  if (!userId) return NextResponse.json({ error: "not signed in" }, { status: 401 });
+
+  const apiKey = process.env.ANAM_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: "ANAM_API_KEY not set" }, { status: 500 });
+
+  const personaConfig = buildPersonaConfig(userId);
+
+  const res = await fetch("https://api.anam.ai/v1/auth/session-token", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ personaConfig }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    return NextResponse.json({ error: "session-token failed", detail }, { status: res.status });
+  }
+
+  const { sessionToken } = await res.json();
+  return NextResponse.json({ sessionToken });
+}
+```
+
+Note: the `ANAM_API_KEY` never leaves the server. The browser only ever sees the short-lived `sessionToken`, which is scoped to this single WebRTC session.
+
+---
+
+## Minimal frontend
+
+Just enough to confirm everything connects end-to-end.
+
+`app/page.tsx`:
+
+```typescript
+"use client";
+import { useRef, useState } from "react";
+import { createClient, AnamEvent, type AnamClient } from "@anam-ai/js-sdk";
+
+export default function Home() {
+  const [status, setStatus] = useState<"idle" | "live" | "ended">("idle");
+  const clientRef = useRef<AnamClient | null>(null);
+
+  async function start() {
+    const { sessionToken } = await fetch("/api/session-token", { method: "POST" })
+      .then((r) => r.json());
+
+    const client = createClient(sessionToken);
+    clientRef.current = client;
+    client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () => setStatus("live"));
+    client.addListener(AnamEvent.CONNECTION_CLOSED, () => setStatus("ended"));
+    await client.streamToVideoElement("avatar-video");
+  }
+
+  return (
+    <main className="p-6">
+      <video id="avatar-video" autoPlay playsInline className="w-full aspect-video bg-black" />
+      {status === "idle" && <button onClick={start}>Start</button>}
+      {status === "live" && <button onClick={() => clientRef.current?.stopStreaming()}>End</button>}
+    </main>
+  );
+}
+```
+
+---
+
+## Verifying end-to-end
+
+Full happy path:
+
+1. Visit localhost:3000 and complete google auth. 
+2. Click **Start**. The avatar should load within a few seconds.
+3. Say: *"What's on my calendar this week?"* — the agent should call `list_events` and read back your upcoming meetings.
+4. Say: *"Find me an hour for focus time tomorrow morning."*
+5. The agent should call `find_free_time` and offer 2–3 slot options.
+6. Confirm one verbally. The agent should call `block_time`, and a new self-only event should appear on your calendar.
+
+### Debugging
+
+- **401 from webhook** → the signature is failing. Check that `PUBLIC_BASE_URL` exactly matches the URL Anam is calling (no trailing slash, correct scheme). The signed payload is `baseUrl|uid|exp` — a mismatch in `baseUrl` between signer and verifier is the most common failure.
+- **Agent doesn't call a tool** → check the tool `description` — the LLM uses this to decide when to invoke. Be explicit about *when* to call it.
+- **Anam returns 4xx on session-token** → check `avatarId` / `voiceId` / `llmId` are all valid for your account, and the API key has access to them.
+
+---
+
+## Refreshing the UI after a tool call
+
+Run through the happy path once and you'll notice something unsatisfying: the agent says *"I've blocked focus time for Tuesday at 2pm"*, but the calendar on the page still shows yesterday's state. The event is real — it's in Google Calendar — but the UI doesn't know anything changed. The user has to reload the page to trust the agent.
+
+The SDK emits an event whenever a server-side tool call finishes: `AnamEvent.TOOL_CALL_COMPLETED`. The payload includes `toolName`, so you can scope the reaction to the tool that actually mutated state.
+
+Pass a `refreshKey` down to the calendar component and bump it when `block_time` completes:
+
+```typescript
+// app/page.tsx
+const [calendarRefreshKey, setCalendarRefreshKey] = useState(0);
+
+// ...inside startSession, after creating the client:
+client.addListener(AnamEvent.TOOL_CALL_COMPLETED, (payload) => {
+  if (payload.toolName === "block_time") {
+    setCalendarRefreshKey((k) => k + 1);
+  }
+});
+
+// ...in the render:
+<BookingsPanel refreshKey={calendarRefreshKey} />
+```
+
+And make the calendar's fetch effect depend on the key:
+
+```typescript
+// app/_components/bookings-panel.tsx
+export function BookingsPanel({ refreshKey = 0 }: { refreshKey?: number }) {
+  // ...
+  useEffect(() => {
+    fetch("/api/events")
+      .then((r) => r.json())
+      .then((data) => setBookings(data.events));
+  }, [refreshKey]);
+  // ...
+}
+```
+
+That's the whole pattern — a counter whose only job is to invalidate the fetch.
+
+A few points worth noting:
+
+- **Scope the listener to mutating tools.** `list_events` and `find_free_time` don't change state, so there's nothing to refresh. Gate on `toolName` so read calls don't trigger unnecessary fetches.
+- **Listen to `TOOL_CALL_COMPLETED`, not `TOOL_CALL_STARTED`.** The started event fires before your webhook runs; if you refresh then, you'll fetch the calendar before the new event actually exists.
+- **Handle `TOOL_CALL_FAILED` too** if you want to surface errors in the UI — it carries an `errorMessage` field. For this cookbook's scope we ignore it; the agent will explain the failure verbally.
+---
+
+## Security properties
+
+The signed-URL-per-session pattern gives you:
+
+- **No shared bearer token** — every tool URL is unique; compromise of one doesn't reuse across users or endpoints.
+- **User scoping** — `uid` is cryptographically bound into every URL.
+- **Endpoint scoping** — a signed `/events` URL can't be replayed against `/freebusy`.
+- **Time scoping** — URLs die with the session, no revocation store needed.
+- **Stateless verification** — just the `PRESIGN_SECRET`, no DB round-trip before the signature is validated.
+
+Things you still need to do:
+
+- **Sign the `userId` cookie** (HMAC) so it can't be forged to impersonate another user — the presign helper won't save you if the caller lies about who they are at the session-token route.
+- **Rotate `PRESIGN_SECRET`** periodically. Support dual secrets during rollover if you have long-lived sessions.
+- **Rate-limit `/api/session-token`** — it's the gateway to minting Anam sessions, which cost money.
+- **Replace the JSON token store** with a real database before production.
+
+---
+
+## Extending to multi-attendee booking
+
+The auth plumbing carries over unchanged — you're adding entries to the `tools` array, not rewriting anything. What changes is the conversation shape and the blast radius.
+
+**What to add:**
+
+- **A `get_contacts` tool** to resolve names to emails. Back it with the Google People API, your internal directory, or a spell-it-out fallback. When multiple matches come back, return all of them and let the agent ask for clarification — a wrong invite is worse than an extra question.
+- **An `attendees` array on `find_free_time`.** Google's `freeBusy` endpoint takes multiple `items`. External attendees (personal Gmail, other domains) return an `errors` entry instead of busy times — surface those as `unknown_availability` so the agent can say so, rather than silently assuming free.
+- **A separate `create_meeting` tool** alongside `block_time`, rather than overloading `block_time` with optional attendees. Two named tools read more clearly to the model and let the system prompt set different confirmation requirements. Set `sendUpdates: "all"` in the handler so Google emails invites on the user's behalf.
+
+**What to change in the system prompt:** the flow gains a hop — *resolve → check availability → offer slots → confirm → create_meeting*. Add rules to match: resolve before checking, ask for clarification on multiple matches, flag unknown availability, read the attendee list back before creating.
+
+**Edge cases that bite:** ambiguous names in large companies, timezone drift across attendees, slots going stale mid-conversation, external attendees without shared free/busy, and declined invites (which need a Google Calendar push-notification channel if you want to track them).
+
+**Security gets real here.** A leaked `block_time` URL can only dirty the user's own calendar. A leaked `create_meeting` URL can **send emails to arbitrary addresses as the user** — a spam and social-engineering vector. Before opening this up: shorten `expiresInSeconds` to ~15 minutes, sign a hash of the request body into the URL so the signature binds to *this specific invite*, rate-limit per user, and audit-log every invite. The [Security properties](#security-properties) list applies in full, plus body-signing.
