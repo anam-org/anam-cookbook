@@ -167,10 +167,11 @@ Every webhook handler will start with one line: `const userId = authenticateWebh
 
 ## Getting user credentials on the server
 
-The webhook handlers need a `userId → refresh_token` mapping. How you populate it is standard Google OAuth and not the point of this cookbook: `/api/auth/google` starts the consent flow, `/api/auth/google/callback` exchanges the code and stores the refresh token keyed by the user's email (which doubles as `userId`), and sets a `userId` cookie. Two details worth naming, because they bite everyone:
+The webhook handlers need a `userId → refresh_token` mapping. How you populate it is standard Google OAuth and not the point of this cookbook: `/api/auth/google` starts the consent flow, `/api/auth/google/callback` exchanges the code and stores the refresh token keyed by the user's email (which doubles as `userId`), and sets a `userId` cookie. Three details worth naming, because they bite everyone:
 
 - Request `access_type: "offline"` **and** `prompt: "consent"` on the auth URL. Without both, returning users only get an access token and you'll be unable to act on their behalf server-side.
 - Persist *only* the refresh token. The `googleapis` client refreshes access tokens automatically from it.
+- Generate a random `state` value on `/api/auth/google`, stash it in a short-lived HttpOnly cookie, and require the callback to match it before exchanging the code — otherwise the flow is open to OAuth CSRF.
 
 For development, a JSON file keyed by userId is fine — the example repo ships one. For anything real, use a database with encryption at rest; see [Security properties](#security-properties).
 
@@ -248,7 +249,7 @@ N.B. we set awaitResponse with disableInterruptions in the tool config to force 
 ```ts
 import { presignUrl } from "./presign";
 
-const SYSTEM_PROMPT = `You are Alex, a scheduling assistant. You help the user see what's on their calendar and block out time for themselves.
+const buildSystemPrompt = () => `You are Alex, a scheduling assistant. You help the user see what's on their calendar and block out time for themselves.
 Today is ${new Date().toDateString()}.
 
 Output format:
@@ -314,7 +315,7 @@ export function buildPersonaConfig(userId: string, expiresInSeconds = 3600) {
     avatarId: process.env.ANAM_AVATAR_ID,
     voiceId: process.env.ANAM_VOICE_ID,
     llmId: process.env.ANAM_LLM_ID,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: buildSystemPrompt(),
     tools: [
       {
         type: "server",
@@ -528,6 +529,7 @@ The signed-URL-per-session pattern gives you:
 
 Things you still need to do:
 
+- **Sign the `userId` cookie** (HMAC) so it can't be forged to impersonate another user — the presign helper won't save you if the caller lies about who they are at the session-token route.
 - **Rotate `PRESIGN_SECRET`** periodically. Support dual secrets during rollover if you have long-lived sessions.
 - **Rate-limit `/api/session-token`** — it's the gateway to minting Anam sessions, which cost money.
 - **Replace the JSON token store** with a real database before production.
