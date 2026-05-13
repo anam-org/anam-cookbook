@@ -1,0 +1,306 @@
+---
+title: Simulate pause and resume for a turnkey session
+description: "Build a client-side pause/resume workaround by restarting an Anam session and injecting the previous transcript as context."
+tags: [javascript, nextjs, turnkey]
+difficulty: intermediate
+date: 2026-05-13
+authors: [bc-anam]
+---
+
+# Simulate pause and resume for a turnkey session
+
+The Anam JavaScript SDK does not currently expose first-class `pauseStreaming()` and `resumeStreaming()` methods. Until those exist, you can simulate pause/resume entirely in the client: treat "pause" as ending the current stream, store the transcript in your application, then treat "resume" as a new session that receives the previous transcript as context.
+
+This is a framework-agnostic pattern. The important pieces are the Anam client lifecycle, transcript storage, and context injection. This recipe uses React and Next.js because they are a common way to build browser apps with the JavaScript SDK.
+
+<Warning>
+This simulates conversational continuity, not Anam session continuity. Each resume creates a distinct Anam session, so Lab session views, recordings, transcripts, reports, API reads, and `client.getActiveSessionId()` will show a new underlying session.
+</Warning>
+
+The complete example code is available at [examples/pause-resume-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/pause-resume-nextjs).
+
+## What you'll build
+
+A Next.js app with an Anam avatar, a transcript panel, and three controls:
+
+- **Start over** begins a new turnkey session and clears the transcript.
+- **Pause** calls `stopStreaming()` and keeps the transcript in the browser.
+- **Resume** creates a new session token, starts a fresh stream, and injects the previous transcript using `addContext()`.
+
+This recipe focuses on turnkey sessions, where Anam's server-side LLM needs transcript context after the restart. The same restart pattern also works for custom LLM and other client-managed flows; it is usually simpler there because your app already owns the message history and can pass it directly to your LLM.
+
+## Prerequisites
+
+- Node.js 18+
+- An Anam account ([sign up at lab.anam.ai](https://lab.anam.ai))
+- Your API key from the Anam Lab dashboard
+
+## Project setup
+
+To run the complete example from the cookbook:
+
+```bash
+git clone https://github.com/anam-org/anam-cookbook.git
+cd anam-cookbook/examples/pause-resume-nextjs
+pnpm install
+cp .env.example .env.local
+```
+
+Then add your Anam API key to `.env.local` and start the app:
+
+```bash
+pnpm dev
+```
+
+To add this pattern to an existing browser app, install the JavaScript SDK:
+
+```bash
+pnpm add @anam-ai/js-sdk
+```
+
+Create an `.env.local` file:
+
+```bash
+ANAM_API_KEY=your_api_key_here
+```
+
+<Tip>
+Never expose your Anam API key in client-side code. The browser should ask your server for a short-lived session token.
+</Tip>
+
+## Session token route
+
+The server route is the same pattern as a normal turnkey app. It exchanges your API key for a session token and includes the persona config.
+
+```typescript
+// src/app/api/session-token/route.ts
+
+import { NextResponse } from "next/server";
+import { personaConfig } from "@/config/persona";
+
+export async function POST() {
+  const apiKey = process.env.ANAM_API_KEY;
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "ANAM_API_KEY is not configured" },
+      { status: 500 }
+    );
+  }
+
+  const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ personaConfig }),
+  });
+
+  if (!response.ok) {
+    return NextResponse.json(
+      { error: "Failed to get session token" },
+      { status: response.status }
+    );
+  }
+
+  const data = await response.json();
+  return NextResponse.json({ sessionToken: data.sessionToken });
+}
+```
+
+## Build resume context
+
+Keep a compact transcript in your app's client-side state layer, whether that is your framework's built-in state mechanism or a small external store. When the user resumes, convert the latest messages into context that tells the turnkey LLM this is a continuation of the same conversation.
+
+```typescript
+import { MessageRole } from "@anam-ai/js-sdk";
+import type { Message } from "@anam-ai/js-sdk";
+
+// Example guardrail, not an SDK requirement. Tune this for your app.
+const MAX_RESUME_CONTEXT_MESSAGES = 24;
+
+type TranscriptMessage = Pick<Message, "role" | "content"> &
+  Partial<Pick<Message, "id" | "interrupted">>;
+
+function buildResumeContext(messages: TranscriptMessage[]) {
+  const transcript = messages
+    .filter((message) => message.content.trim())
+    .slice(-MAX_RESUME_CONTEXT_MESSAGES)
+    .map((message, index) => {
+      const speaker = message.role === MessageRole.USER ? "User" : "Assistant";
+      return `${index + 1}. ${speaker}: ${message.content}`;
+    })
+    .join("\n");
+
+  return [
+    "System note: this is a resumed Anam session.",
+    "Treat the transcript below as prior conversation with the same user.",
+    "Use it to answer follow-up questions, but do not mention the session restart unless the user asks.",
+    "",
+    transcript || "No prior transcript was captured.",
+  ].join("\n");
+}
+```
+
+`MAX_RESUME_CONTEXT_MESSAGES` is an application-level tradeoff, not an Anam SDK rule. A small cap keeps resume fast and limits context cost, while a larger cap preserves more conversational detail. Tune it for your product, and consider summarizing older messages instead of sending the full history each time.
+
+## Start, pause, and resume
+
+The core loop is: create a new client for every start/resume, inject context after the session is ready, and stop the current client when pausing.
+
+```typescript
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import { AnamEvent, createClient } from "@anam-ai/js-sdk";
+import type { AnamClient, Message } from "@anam-ai/js-sdk";
+
+type Status = "idle" | "connecting" | "connected" | "paused" | "error";
+
+function mergeTranscript(
+  current: TranscriptMessage[],
+  incoming: TranscriptMessage[]
+) {
+  const next = [...current];
+
+  for (const message of incoming) {
+    if (!message.content.trim()) continue;
+
+    const existingIndex = message.id
+      ? next.findIndex((item) => item.id === message.id)
+      : -1;
+
+    if (existingIndex === -1) {
+      next.push(message);
+    } else {
+      next[existingIndex] = message;
+    }
+  }
+
+  return next;
+}
+
+export function PauseResumePlayer() {
+  const [status, setStatus] = useState<Status>("idle");
+  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
+  const clientRef = useRef<AnamClient | null>(null);
+  const messagesRef = useRef<TranscriptMessage[]>([]);
+  const pendingResumeContextRef = useRef("");
+  const sessionNumberRef = useRef(0);
+
+  const setTranscript = useCallback((nextMessages: TranscriptMessage[]) => {
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+  }, []);
+
+  const startSession = useCallback(async (resumeFrom?: TranscriptMessage[]) => {
+    setStatus("connecting");
+    const sessionNumber = sessionNumberRef.current + 1;
+    sessionNumberRef.current = sessionNumber;
+
+    const resumeContext = resumeFrom?.length
+      ? buildResumeContext(resumeFrom)
+      : "";
+    pendingResumeContextRef.current = resumeContext;
+
+    const response = await fetch("/api/session-token", { method: "POST" });
+    const { sessionToken } = await response.json();
+    const client = createClient(sessionToken);
+    clientRef.current = client;
+
+    client.addListener(AnamEvent.SESSION_READY, () => {
+      setStatus("connected");
+
+      const context = pendingResumeContextRef.current;
+      pendingResumeContextRef.current = "";
+
+      if (context) {
+        client.addContext(context);
+      }
+    });
+
+    client.addListener(AnamEvent.MESSAGE_HISTORY_UPDATED, (history: Message[]) => {
+      const sessionHistory = history.map((message) => ({
+        ...message,
+        id: `${sessionNumber}:${message.id}`,
+      }));
+
+      setTranscript(mergeTranscript(messagesRef.current, sessionHistory));
+    });
+
+    await client.streamToVideoElement("avatar-video");
+  }, [setTranscript]);
+
+  const pauseSession = useCallback(async () => {
+    const client = clientRef.current;
+    clientRef.current = null;
+
+    if (client?.isStreaming()) {
+      await client.stopStreaming();
+    }
+
+    setStatus("paused");
+  }, []);
+
+  const resumeSession = useCallback(() => {
+    void startSession(messagesRef.current);
+  }, [startSession]);
+
+  return (
+    <>
+      <video id="avatar-video" autoPlay playsInline />
+      <button onClick={() => void startSession()}>Start</button>
+      <button onClick={() => void pauseSession()} disabled={status !== "connected"}>
+        Pause
+      </button>
+      <button onClick={resumeSession} disabled={status !== "paused"}>
+        Resume
+      </button>
+      <pre>{JSON.stringify(messages, null, 2)}</pre>
+    </>
+  );
+}
+```
+
+The complete example has two extra pieces that are worth keeping in real apps:
+
+- It listens to `MESSAGE_STREAM_EVENT_RECEIVED` so partial persona speech is flushed into the transcript before pause.
+- It uses a fuller upsert helper to avoid duplicate transcript entries when history and streaming events arrive close together.
+
+## Send text while connected
+
+If you also support typed messages, append them to the local transcript before calling `sendUserMessage()`. That way, a quick pause immediately after sending still preserves the user's message.
+
+```typescript
+function sendUserText(content: string) {
+  const client = clientRef.current;
+  if (!content.trim() || !client?.isStreaming()) return;
+
+  setTranscript([
+    ...messagesRef.current,
+    {
+      id: crypto.randomUUID(),
+      role: MessageRole.USER,
+      content,
+    },
+  ]);
+
+  client.sendUserMessage(content);
+}
+```
+
+## Limitations and production notes
+
+- **Session identity**: each resume starts a new Anam session. In Anam Lab, the Sessions view, recordings, transcripts, and session reports will show these as separate sessions rather than one paused-and-resumed session.
+- **API reads**: API calls such as get session, get recording, transcript retrieval, and reporting endpoints remain session-scoped. Querying the first session will not include the resumed session's recording or transcript.
+- **SDK session IDs**: `client.getActiveSessionId()` returns the currently connected Anam session ID. After resume, the old client has stopped and the new client has a new active session ID.
+- **Application correlation**: if you need a unified customer-facing conversation, create your own app-level conversation ID and store the list of Anam session IDs created by each resume.
+- **Client state**: anything attached to the old client instance, including event listeners, tool handlers, selected media devices, local timers, and UI state derived from the stream, must be recreated or reconciled for the new client.
+- **Billing and analytics**: usage, duration, latency, errors, and other session metrics will be counted per underlying Anam session. Resume should be interpreted as a new session in internal analytics.
+- **Privacy**: prior transcript context is sent to the resumed turnkey session. Treat it like conversation data and avoid displaying hidden resume context in a customer-facing UI.
+- **Latency**: resume performs a full session startup, so there will be reconnect latency.
+- **Greetings**: a fresh session may produce a fresh greeting. Tune your persona prompt so it uses prior context naturally and does not announce the restart.
+- **History size**: choose an explicit transcript cap or summarization strategy before calling `addContext()`.
+- **Transcript fidelity**: the resumed session only knows what your app captured and injected. Flush partial speech before pause, and decide how to handle interrupted or incomplete turns.
+- **Future SDK support**: if Anam adds first-class `pauseStreaming()` and `resumeStreaming()` methods, prefer those over this restart-and-context workaround.
