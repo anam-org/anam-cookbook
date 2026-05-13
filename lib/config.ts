@@ -52,6 +52,7 @@ export const topics: TopicConfig[] = [
 // Order matters - first items appear first
 export const featuredRecipeSlugs: string[] = [
   'basic-nextjs-app',
+  'livekit-avatar-livestream',
   'gemini-vision-with-anam-livekit',
   'elevenlabs-server-side-agents',
   'client-side-tools',
