@@ -1,14 +1,14 @@
 ---
-title: Transparent avatar backgrounds with canvas green-screen keying
-description: "Use a custom green-screen Anam avatar and client-side canvas chroma keying to place the avatar directly inside your web UI."
-tags: [javascript, avatar, chroma-key, canvas]
+title: Transparent avatar backgrounds with WebGL green-screen keying
+description: "Use a custom green-screen Anam avatar and WebGL canvas chroma keying to place the avatar directly inside your web UI."
+tags: [javascript, avatar, chroma-key, canvas, webgl]
 date: 2026-05-13
 authors: [bc-anam]
 ---
 
 ![A green-screen Anam avatar keyed into an Anam documentation page](/img/transparent-backgrounds/transparent-avatar-headline.jpg)
 
-This recipe shows how to make an Anam avatar feel embedded in your product instead of boxed into a rectangular video player. We'll create a custom avatar from a green-screen image, stream the avatar into a hidden `<video>`, remove the green pixels in a client-side `<canvas>`, and place that transparent canvas over a page background.
+This recipe shows how to make an Anam avatar feel embedded in your product instead of boxed into a rectangular video player. We'll create a custom avatar from a green-screen image, stream the avatar into a hidden `<video>`, remove the green pixels in a WebGL-backed `<canvas>`, and place that transparent canvas over a page background.
 
 The complete example code is at [examples/transparent-background-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/transparent-background-nextjs).
 
@@ -19,7 +19,7 @@ A Next.js app that:
 - Creates a custom Anam avatar from a green-screen source image
 - Uses that avatar in a standard Anam session token
 - Streams Anam video into a hidden browser video element
-- Applies chroma-key transparency in a client-side canvas
+- Applies chroma-key transparency with a WebGL fragment shader
 - Places the keyed avatar directly over an Anam docs page background
 - Includes a client tool that can switch the scene behind the avatar
 
@@ -168,51 +168,81 @@ const client = createClient(sessionToken);
 await client.streamToVideoElement("anam-hidden-video");
 ```
 
-## Key the green pixels in canvas
+## Key the green pixels in WebGL
 
-The canvas loop draws either the live video frame or the fallback source image. After drawing, it reads pixels, detects green background pixels, and reduces their alpha.
+The canvas loop draws either the live video frame or the fallback source image into a WebGL texture. The fragment shader keys each pixel on the GPU, so the browser does not need to call `getImageData`, loop over every pixel in JavaScript, and write the frame back with `putImageData`.
 
 ```typescript
-function applyGreenScreenKey(frame: ImageData, settings: KeySettings) {
-  const pixels = frame.data;
+const fragmentShaderSource = `
+precision mediump float;
 
-  for (let index = 0; index < pixels.length; index += 4) {
-    const red = pixels[index];
-    const green = pixels[index + 1];
-    const blue = pixels[index + 2];
-    const minChannel = Math.min(red, green, blue);
-    const maxRedBlue = Math.max(red, blue);
-    const maxChannel = Math.max(red, green, blue);
-    const saturation = maxChannel === 0 ? 0 : (maxChannel - minChannel) / maxChannel;
-    const greenDominance = green - maxRedBlue;
-    const keyRamp = Math.max(8, settings.softness * 0.55);
-    const isGreen =
-      green === maxChannel &&
-      green > settings.minGreen &&
-      green > red * settings.greenBias &&
-      green > blue * settings.greenBias &&
-      saturation > 0.08 &&
-      greenDominance > 2;
+uniform sampler2D u_source;
+uniform float u_minGreen;
+uniform float u_greenBias;
+uniform float u_softness;
+uniform float u_spill;
 
-    if (isGreen) {
-      const keyedAmount = clamp(
-        (greenDominance - 2) / keyRamp + (saturation - 0.08) * 1.8,
-        0,
-        1,
-      );
-      pixels[index + 3] = Math.round(255 * (1 - keyedAmount));
-    } else if (greenDominance > 8 && green > 70) {
-      pixels[index + 1] = Math.round(
-        green - greenDominance * settings.spill,
-      );
-    }
+varying vec2 v_texCoord;
+
+void main() {
+  vec4 texel = texture2D(u_source, v_texCoord);
+  float red = texel.r * 255.0;
+  float green = texel.g * 255.0;
+  float blue = texel.b * 255.0;
+  float minChannel = min(red, min(green, blue));
+  float maxRedBlue = max(red, blue);
+  float maxChannel = max(red, max(green, blue));
+  float saturation = maxChannel == 0.0
+    ? 0.0
+    : (maxChannel - minChannel) / maxChannel;
+  float greenDominance = green - maxRedBlue;
+  float keyRamp = max(8.0, u_softness * 0.55);
+  bool isGreen =
+    green == maxChannel &&
+    green > u_minGreen &&
+    green > red * u_greenBias &&
+    green > blue * u_greenBias &&
+    saturation > 0.08 &&
+    greenDominance > 2.0;
+
+  vec3 color = texel.rgb;
+  float alpha = texel.a;
+
+  if (isGreen) {
+    float keyedAmount = clamp(
+      (greenDominance - 2.0) / keyRamp + (saturation - 0.08) * 1.8,
+      0.0,
+      1.0
+    );
+    alpha = texel.a * (1.0 - keyedAmount);
+  } else if (greenDominance > 8.0 && green > 70.0) {
+    color.g = max(0.0, green - greenDominance * u_spill) / 255.0;
   }
 
-  return frame;
+  gl_FragColor = vec4(color, alpha);
 }
+`;
 ```
 
-This is intentionally simple. In production, you may want a fragment shader or WebGL/WebGPU pipeline for lower CPU cost, especially if you are rendering several avatars at once.
+Each animation frame uploads the current video frame to the texture, updates the keying uniforms, and draws one full-canvas rectangle:
+
+```typescript
+gl.texImage2D(
+  gl.TEXTURE_2D,
+  0,
+  gl.RGBA,
+  gl.RGBA,
+  gl.UNSIGNED_BYTE,
+  source,
+);
+gl.uniform1f(uniforms.minGreen, settings.minGreen);
+gl.uniform1f(uniforms.greenBias, settings.greenBias);
+gl.uniform1f(uniforms.softness, settings.softness);
+gl.uniform1f(uniforms.spill, settings.spill);
+gl.drawArrays(gl.TRIANGLES, 0, 6);
+```
+
+This keeps the per-pixel work on the GPU and leaves JavaScript responsible only for choosing the source frame and updating settings.
 
 ## Place the avatar into the page
 
