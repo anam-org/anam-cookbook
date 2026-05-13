@@ -85,7 +85,10 @@ export function TransparentAvatarExperience() {
   const [scene, setScene] = useState<SceneId>("docs");
   const [messages, setMessages] = useState<Message[]>([]);
   const [settings, setSettings] = useState<KeySettings>(defaultKeySettings);
+  const [showControls, setShowControls] = useState(true);
+  const [showRestoreControl, setShowRestoreControl] = useState(false);
   const clientRef = useRef<AnamClient | null>(null);
+  const restoreTimerRef = useRef<number | null>(null);
 
   const handleToolEvent = useCallback((event: ClientToolEvent) => {
     if (event.eventName !== "set_showcase_scene") return;
@@ -135,9 +138,62 @@ export function TransparentAvatarExperience() {
     setMessages([]);
   }, []);
 
+  const hideRestoreControlLater = useCallback(() => {
+    if (restoreTimerRef.current) {
+      window.clearTimeout(restoreTimerRef.current);
+    }
+
+    restoreTimerRef.current = window.setTimeout(() => {
+      setShowRestoreControl(false);
+    }, 1600);
+  }, []);
+
+  const enterCleanView = useCallback(() => {
+    setShowControls(false);
+    setShowRestoreControl(true);
+    hideRestoreControlLater();
+  }, [hideRestoreControlLater]);
+
+  const showControlDock = useCallback(() => {
+    if (restoreTimerRef.current) {
+      window.clearTimeout(restoreTimerRef.current);
+    }
+
+    setShowRestoreControl(false);
+    setShowControls(true);
+  }, []);
+
+  const revealRestoreControl = useCallback(() => {
+    if (showControls) return;
+
+    setShowRestoreControl(true);
+    hideRestoreControlLater();
+  }, [hideRestoreControlLater, showControls]);
+
   useEffect(() => {
     return () => {
       clientRef.current?.stopStreaming();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (showControls) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        showControlDock();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showControlDock, showControls]);
+
+  useEffect(() => {
+    return () => {
+      if (restoreTimerRef.current) {
+        window.clearTimeout(restoreTimerRef.current);
+      }
     };
   }, []);
 
@@ -147,7 +203,10 @@ export function TransparentAvatarExperience() {
 
   return (
     <main
-      className={`experience ${currentScene.className}`}
+      className={`experience ${currentScene.className} ${
+        showControls ? "" : "controls-hidden"
+      }`}
+      onPointerMove={revealRestoreControl}
       style={currentScene.style}
     >
       <section className="hero-shell" aria-label={currentScene.title}>
@@ -167,94 +226,115 @@ export function TransparentAvatarExperience() {
         </div>
       </section>
 
-      <aside className="control-dock" aria-label="Avatar controls">
-        <div className="session-actions">
-          {connectionState === "connected" ? (
-            <button className="button button-light" onClick={stopSession}>
-              End session
-            </button>
-          ) : (
+      {showControls ? (
+        <aside className="control-dock" aria-label="Avatar controls">
+          <div className="session-actions">
+            {connectionState === "connected" ? (
+              <button className="button button-light" onClick={stopSession}>
+                End session
+              </button>
+            ) : (
+              <button
+                className="button button-light"
+                disabled={connectionState === "connecting"}
+                onClick={startSession}
+              >
+                {connectionState === "connecting"
+                  ? "Connecting..."
+                  : "Start conversation"}
+              </button>
+            )}
             <button
-              className="button button-light"
-              disabled={connectionState === "connecting"}
-              onClick={startSession}
+              className="button button-secondary"
+              onClick={enterCleanView}
             >
-              {connectionState === "connecting"
-                ? "Connecting..."
-                : "Start conversation"}
+              Clean view
             </button>
-          )}
-        </div>
-
-        {error && <p className="error-message">{error}</p>}
-
-        <div className="scene-switcher">
-          {Object.entries(scenes).map(([id, item]) => (
-            <button
-              key={id}
-              className={scene === id ? "scene-button active" : "scene-button"}
-              onClick={() => setScene(id as SceneId)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="media-row">
-          <Image
-            src="/greenscreen-david.jpg"
-            alt="Green-screen avatar source"
-            width={72}
-            height={48}
-          />
-          <div>
-            <span>Source</span>
-            <strong>Green-screen custom avatar</strong>
           </div>
-        </div>
 
-        <label className="range-control">
-          <span>Key strength</span>
-          <input
-            type="range"
-            min="28"
-            max="120"
-            value={settings.minGreen}
-            onChange={(event) =>
-              setSettings((current) => ({
-                ...current,
-                minGreen: Number(event.target.value),
-              }))
-            }
-          />
-        </label>
+          {error && <p className="error-message">{error}</p>}
 
-        <label className="range-control">
-          <span>Edge softness</span>
-          <input
-            type="range"
-            min="18"
-            max="90"
-            value={settings.softness}
-            onChange={(event) =>
-              setSettings((current) => ({
-                ...current,
-                softness: Number(event.target.value),
-              }))
-            }
-          />
-        </label>
+          <div className="scene-switcher">
+            {Object.entries(scenes).map(([id, item]) => (
+              <button
+                key={id}
+                className={
+                  scene === id ? "scene-button active" : "scene-button"
+                }
+                onClick={() => setScene(id as SceneId)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
 
-        <div className="transcript">
-          {messages.slice(-3).map((message) => (
-            <p key={message.id}>
-              <strong>{message.role === "user" ? "You" : "Avatar"}</strong>
-              {message.content}
-            </p>
-          ))}
-          {messages.length === 0 && <p>Say: change the background to studio.</p>}
-        </div>
-      </aside>
+          <div className="media-row">
+            <Image
+              src="/greenscreen-david.jpg"
+              alt="Green-screen avatar source"
+              width={72}
+              height={48}
+            />
+            <div>
+              <span>Source</span>
+              <strong>Green-screen custom avatar</strong>
+            </div>
+          </div>
+
+          <label className="range-control">
+            <span>Key strength</span>
+            <input
+              type="range"
+              min="28"
+              max="120"
+              value={settings.minGreen}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  minGreen: Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+
+          <label className="range-control">
+            <span>Edge softness</span>
+            <input
+              type="range"
+              min="18"
+              max="90"
+              value={settings.softness}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  softness: Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+
+          <div className="transcript">
+            {messages.slice(-3).map((message) => (
+              <p key={message.id}>
+                <strong>{message.role === "user" ? "You" : "Avatar"}</strong>
+                {message.content}
+              </p>
+            ))}
+            {messages.length === 0 && (
+              <p>Say: change the background to studio.</p>
+            )}
+          </div>
+        </aside>
+      ) : (
+        <button
+          className={`restore-controls ${
+            showRestoreControl ? "is-visible" : ""
+          }`}
+          onClick={showControlDock}
+        >
+          Controls
+        </button>
+      )}
     </main>
   );
 }
