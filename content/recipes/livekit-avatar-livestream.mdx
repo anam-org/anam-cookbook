@@ -1,6 +1,6 @@
 ---
-title: Live avatar stream with LiveKit and Anam
-description: "Build a Twitch-style public stream where an Anam Cara 4 avatar hosts shared chat, with optional dynamic web backdrops."
+title: Live avatar stream with OpenAI Realtime 2, LiveKit, and Anam
+description: "Build a Twitch-style public stream where OpenAI Realtime 2 drives an Anam Cara 4 avatar in a shared LiveKit room."
 tags: [livekit, javascript, agents, avatar]
 date: 2026-05-13
 authors: [bc-anam]
@@ -8,9 +8,9 @@ authors: [bc-anam]
 
 ![An Anam avatar hosting a tech news stream with a scrolling article backdrop and live chat](/img/livekit-avatar-livestream/avatar-newsreel.png)
 
-This recipe shows how to build a public livestream where one Anam avatar is the
-host, viewers join from a URL, everyone shares the same chat, and the host reacts
-to the room like a lightweight streamer.
+This recipe shows how to build a public livestream where OpenAI Realtime 2 drives
+one Anam Cara 4 avatar, viewers join from a URL, everyone shares the same LiveKit
+chat, and the avatar reacts to the room like a lightweight streamer.
 
 The complete working example is in
 [anam-org/anam-live-stream](https://github.com/anam-org/anam-live-stream). Use
@@ -26,8 +26,8 @@ You will build two deployable pieces:
 
 LiveKit is the realtime transport. It carries avatar audio/video tracks from the
 agent side to every viewer, and it carries chat messages as reliable data
-messages. Anam renders the Cara 4 avatar into the room. OpenAI Realtime gives the
-avatar a low-latency speaking voice.
+messages. Anam renders the Cara 4 avatar into the room. OpenAI Realtime 2 gives
+the avatar a low-latency speaking voice.
 
 ## Architecture
 
@@ -36,7 +36,7 @@ The core loop looks like this:
 1. A viewer opens the Vercel app.
 2. The app asks your server for a short-lived LiveKit viewer token.
 3. That token endpoint also dispatches the LiveKit agent into the room.
-4. The agent waits for at least one real viewer, then starts OpenAI Realtime.
+4. The agent waits for at least one real viewer, then starts OpenAI Realtime 2.
 5. The agent starts an Anam avatar session with `avatarModel: "cara-4-latest"`.
 6. Anam publishes the avatar video into the LiveKit room.
 7. Viewers send chat over a LiveKit data topic.
@@ -301,7 +301,7 @@ agentSession.output.audio = new voice.DataStreamAudioOutput({
 });
 ```
 
-That is the bridge: OpenAI Realtime decides what to say, LiveKit carries the
+That is the bridge: OpenAI Realtime 2 decides what to say, LiveKit carries the
 audio stream, and Anam turns that audio into the live avatar video track.
 
 ## Make the host respond periodically
