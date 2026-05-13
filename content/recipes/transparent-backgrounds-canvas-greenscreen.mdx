@@ -1,0 +1,289 @@
+---
+title: Transparent avatar backgrounds with canvas green-screen keying
+description: "Use a custom green-screen Anam avatar and client-side canvas chroma keying to place the avatar directly inside your web UI."
+tags: [javascript, avatar, chroma-key, canvas]
+date: 2026-05-13
+authors: [bc-anam]
+---
+
+![A green-screen Anam avatar keyed into an Anam documentation page](/img/transparent-backgrounds/transparent-avatar-headline.jpg)
+
+This recipe shows how to make an Anam avatar feel embedded in your product instead of boxed into a rectangular video player. We'll create a custom avatar from a green-screen image, stream the avatar into a hidden `<video>`, remove the green pixels in a client-side `<canvas>`, and place that transparent canvas over a page background.
+
+The complete example code is at [examples/transparent-background-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/transparent-background-nextjs).
+
+## What you'll build
+
+A Next.js app that:
+
+- Creates a custom Anam avatar from a green-screen source image
+- Uses that avatar in a standard Anam session token
+- Streams Anam video into a hidden browser video element
+- Applies chroma-key transparency in a client-side canvas
+- Places the keyed avatar directly over an Anam docs page background
+- Includes a client tool that can switch the scene behind the avatar
+
+## Prerequisites
+
+- Node.js 20+
+- pnpm
+- An Anam API key from [lab.anam.ai](https://lab.anam.ai)
+- Access to custom avatar creation for your organization
+
+<Tip>
+Never expose your Anam API key in client-side code. The browser asks your server for a session token; only the server calls Anam with `ANAM_API_KEY`.
+</Tip>
+
+## Project setup
+
+Clone the cookbook and install the example:
+
+```bash
+git clone https://github.com/anam-org/anam-cookbook.git
+cd anam-cookbook/examples/transparent-background-nextjs
+pnpm install
+cp .env.example .env.local
+```
+
+Add your API key:
+
+```bash
+ANAM_API_KEY=your_anam_api_key_here
+```
+
+## Use a green-screen source image
+
+The custom avatar needs a plain green background so the browser can remove it later. This example includes a downsampled version of the source image used to create the avatar:
+
+![Green-screen David source image](/img/transparent-backgrounds/greenscreen-david.jpg)
+
+The file in the example is `public/greenscreen-david.jpg`. It is 3:2, larger than 720x480, and below the upload size limit.
+
+<Tip>
+The [custom avatar best practices](https://anam.ai/docs/personas/avatars/custom-avatar-best-practices) recommend JPEG or PNG, at least 720x480, and 3:2 or 16:9 framing. Keep the background a consistent green and leave a little room around the head and shoulders.
+</Tip>
+
+<Tip>
+Text-to-image tools like Nano Banana are great for swapping an existing portrait background to green. In the prompt, specify that there should be **no green spill on the person or around the border**. Otherwise, image models often add green edge glow as if the subject were standing in front of a real green screen, which makes the browser key harder to tune.
+</Tip>
+
+## Create the custom avatar
+
+The example includes a small Node script that calls the [Create Avatar endpoint](https://anam.ai/docs/api-reference/create-avatar). The endpoint accepts either `multipart/form-data` with `imageFile`, or JSON with `imageUrl`; this script uses the local image file.
+
+```bash
+pnpm create-avatar
+```
+
+The script prints an environment variable:
+
+```bash
+ANAM_AVATAR_ID=...
+```
+
+Copy that value into `.env.local`:
+
+```bash
+ANAM_API_KEY=your_anam_api_key_here
+ANAM_AVATAR_ID=your_green_screen_avatar_id_here
+ANAM_VOICE_ID=6af524f7-68e3-4ecd-933d-c06e3d8ef9b8
+ANAM_LLM_ID=0934d97d-0c3a-4f33-91b0-5e136a0ef466
+ANAM_AVATAR_MODEL=cara-4-latest
+```
+
+The core of the script is just a `FormData` upload:
+
+```javascript
+const body = new FormData();
+
+body.append("displayName", "Green Screen David");
+body.append("avatarModel", "cara-4-latest");
+body.append(
+  "imageFile",
+  new Blob([image], { type: "image/jpeg" }),
+  "greenscreen-david.jpg",
+);
+
+const response = await fetch("https://api.anam.ai/v1/avatars", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${apiKey}`,
+  },
+  body,
+});
+```
+
+## Create a session token
+
+Once the avatar exists, use its `avatarId` in a normal persona config. The browser calls this route before starting the Anam SDK client:
+
+```typescript
+// src/app/api/session-token/route.ts
+
+const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  },
+  body: JSON.stringify({
+    personaConfig: {
+      name: "Transparent Background Concierge",
+      avatarId: process.env.ANAM_AVATAR_ID,
+      avatarModel: "cara-4-latest",
+      voiceId: process.env.ANAM_VOICE_ID,
+      llmId: process.env.ANAM_LLM_ID,
+      systemPrompt: "You are a concise product concierge embedded directly into a website.",
+    },
+  }),
+});
+```
+
+## Stream into a hidden video
+
+The SDK still streams into a video element. We keep that video available for audio playback and as a canvas source, but hide it visually:
+
+```typescript
+<GreenScreenCanvas
+  videoElementId="anam-hidden-video"
+  fallbackImageSrc="/greenscreen-david.jpg"
+  isStreaming={connectionState === "connected"}
+  settings={settings}
+/>
+
+<video
+  id="anam-hidden-video"
+  autoPlay
+  playsInline
+  className="hidden-video"
+/>
+```
+
+Then start Anam in the usual way:
+
+```typescript
+const sessionToken = await fetchSessionToken();
+const client = createClient(sessionToken);
+
+await client.streamToVideoElement("anam-hidden-video");
+```
+
+## Key the green pixels in canvas
+
+The canvas loop draws either the live video frame or the fallback source image. After drawing, it reads pixels, detects green background pixels, and reduces their alpha.
+
+```typescript
+function applyGreenScreenKey(frame: ImageData, settings: KeySettings) {
+  const pixels = frame.data;
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const red = pixels[index];
+    const green = pixels[index + 1];
+    const blue = pixels[index + 2];
+    const minChannel = Math.min(red, green, blue);
+    const maxRedBlue = Math.max(red, blue);
+    const maxChannel = Math.max(red, green, blue);
+    const saturation = maxChannel === 0 ? 0 : (maxChannel - minChannel) / maxChannel;
+    const greenDominance = green - maxRedBlue;
+    const keyRamp = Math.max(8, settings.softness * 0.55);
+    const isGreen =
+      green === maxChannel &&
+      green > settings.minGreen &&
+      green > red * settings.greenBias &&
+      green > blue * settings.greenBias &&
+      saturation > 0.08 &&
+      greenDominance > 2;
+
+    if (isGreen) {
+      const keyedAmount = clamp(
+        (greenDominance - 2) / keyRamp + (saturation - 0.08) * 1.8,
+        0,
+        1,
+      );
+      pixels[index + 3] = Math.round(255 * (1 - keyedAmount));
+    } else if (greenDominance > 8 && green > 70) {
+      pixels[index + 1] = Math.round(
+        green - greenDominance * settings.spill,
+      );
+    }
+  }
+
+  return frame;
+}
+```
+
+This is intentionally simple. In production, you may want a fragment shader or WebGL/WebGPU pipeline for lower CPU cost, especially if you are rendering several avatars at once.
+
+## Place the avatar into the page
+
+Once the canvas has transparent pixels, it behaves like any other transparent layer. The example positions it over a docs page background and lets the surrounding UI show through:
+
+```css
+.avatar-canvas {
+  position: absolute;
+  right: -4vw;
+  bottom: -12vh;
+  width: min(58vw, 860px);
+  height: auto;
+  filter: drop-shadow(0 34px 42px rgba(0, 0, 0, 0.32));
+}
+```
+
+The headline screenshot uses an Anam docs page image, but the same technique works over product tours, dashboards, checkout flows, education content, games, or any other DOM you control.
+
+## Change the scene with a client tool
+
+The example persona includes a small client tool:
+
+```typescript
+{
+  type: "client",
+  name: "set_showcase_scene",
+  description:
+    "Change the page scene behind the transparent avatar when the user asks for a different background, setting, mood, or use case.",
+  parameters: {
+    type: "object",
+    properties: {
+      scene: {
+        type: "string",
+        enum: ["docs", "studio", "product"],
+      },
+    },
+    required: ["scene"],
+  },
+}
+```
+
+The browser listens for the tool event and updates React state:
+
+```typescript
+client.addListener(AnamEvent.CLIENT_TOOL_EVENT_RECEIVED, (event) => {
+  if (event.eventName !== "set_showcase_scene") return;
+  setScene(event.eventData.scene);
+});
+```
+
+This is where the pattern gets interesting. Instead of switching between preset scenes, you could have the avatar call a server-side tool that sends a prompt to a text-to-image model, returns the generated background URL, and updates the CSS behind the transparent canvas while the avatar keeps talking.
+
+## Running the app
+
+```bash
+pnpm dev
+```
+
+Open [http://localhost:3000](http://localhost:3000), click **Start conversation**, and try:
+
+- "Change the background to the studio."
+- "Show me the product view."
+- "How could this avatar guide a user through this page?"
+
+## Tuning
+
+If you still see green around the avatar, adjust the controls in the example or change the defaults in `GreenScreenCanvas.tsx`:
+
+- `minGreen` controls how green a pixel needs to be before it can be removed
+- `greenBias` requires the green channel to dominate red and blue
+- `softness` controls how quickly green pixels fade to transparent
+- `spill` reduces green tint on nearby edge pixels
+
+Docs: [Create Avatar](https://anam.ai/docs/api-reference/create-avatar), [Custom Avatar Best Practices](https://anam.ai/docs/personas/avatars/custom-avatar-best-practices), [JavaScript SDK embedding overview](https://anam.ai/docs/embed/overview).
