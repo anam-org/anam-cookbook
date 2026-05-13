@@ -63,6 +63,10 @@ The file in the example is `public/greenscreen-david.jpg`. It is 3:2, larger tha
 The [custom avatar best practices](https://anam.ai/docs/personas/avatars/custom-avatar-best-practices) recommend JPEG or PNG, at least 720x480, and 3:2 or 16:9 framing. Keep the background a consistent green and leave a little room around the head and shoulders.
 </Tip>
 
+<Tip>
+Text-to-image tools like Nano Banana are great for swapping an existing portrait background to green. In the prompt, specify that there should be **no green spill on the person or around the border**. Otherwise, image models often add green edge glow as if the subject were standing in front of a real green screen, which makes the browser key harder to tune.
+</Tip>
+
 ## Create the custom avatar
 
 The example includes a small Node script that calls the [Create Avatar endpoint](https://anam.ai/docs/api-reference/create-avatar). The endpoint accepts either `multipart/form-data` with `imageFile`, or JSON with `imageUrl`; this script uses the local image file.

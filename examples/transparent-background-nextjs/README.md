@@ -23,6 +23,8 @@ ANAM_AVATAR_MODEL=cara-4-latest pnpm create-avatar
 
 Copy the printed `ANAM_AVATAR_ID=...` value into `.env.local`.
 
+Text-to-image tools like Nano Banana work well for replacing an existing portrait background with green. Ask for no green spill on the person or around the border; otherwise they can add green edge glow that looks like real green-screen spill and is harder to key cleanly.
+
 ## Run
 
 ```bash
