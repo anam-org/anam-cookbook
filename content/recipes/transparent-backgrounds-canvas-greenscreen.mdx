@@ -6,7 +6,7 @@ date: 2026-05-13
 authors: [bc-anam]
 ---
 
-![A green-screen Anam avatar keyed into an Anam.ai homepage-style interface](/img/transparent-backgrounds/transparent-avatar-headline.jpg)
+![A green-screen Anam avatar keyed into an Anam documentation page](/img/transparent-backgrounds/transparent-avatar-headline.jpg)
 
 This recipe shows how to make an Anam avatar feel embedded in your product instead of boxed into a rectangular video player. We'll create a custom avatar from a green-screen image, stream the avatar into a hidden `<video>`, remove the green pixels in a client-side `<canvas>`, and place that transparent canvas over a page background.
 
@@ -20,7 +20,7 @@ A Next.js app that:
 - Uses that avatar in a standard Anam session token
 - Streams Anam video into a hidden browser video element
 - Applies chroma-key transparency in a client-side canvas
-- Places the keyed avatar directly over an Anam.ai-style homepage background
+- Places the keyed avatar directly over an Anam docs page background
 - Includes a client tool that can switch the scene behind the avatar
 
 ## Prerequisites
@@ -216,7 +216,7 @@ This is intentionally simple. In production, you may want a fragment shader or W
 
 ## Place the avatar into the page
 
-Once the canvas has transparent pixels, it behaves like any other transparent layer. The example positions it over a homepage background and lets the surrounding UI show through:
+Once the canvas has transparent pixels, it behaves like any other transparent layer. The example positions it over a docs page background and lets the surrounding UI show through:
 
 ```css
 .avatar-canvas {
@@ -229,7 +229,7 @@ Once the canvas has transparent pixels, it behaves like any other transparent la
 }
 ```
 
-The headline screenshot uses an Anam.ai homepage-style image, but the same technique works over product tours, dashboards, checkout flows, education content, games, or any other DOM you control.
+The headline screenshot uses an Anam docs page image, but the same technique works over product tours, dashboards, checkout flows, education content, games, or any other DOM you control.
 
 ## Change the scene with a client tool
 
@@ -246,7 +246,7 @@ The example persona includes a small client tool:
     properties: {
       scene: {
         type: "string",
-        enum: ["homepage", "studio", "product"],
+        enum: ["docs", "studio", "product"],
       },
     },
     required: ["scene"],

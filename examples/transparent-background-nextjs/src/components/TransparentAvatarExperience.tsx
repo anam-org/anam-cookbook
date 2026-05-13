@@ -18,7 +18,7 @@ import {
 } from "@/components/GreenScreenCanvas";
 
 type ConnectionState = "idle" | "connecting" | "connected" | "error";
-type SceneId = "homepage" | "studio" | "product";
+type SceneId = "docs" | "studio" | "product";
 
 const videoElementId = "anam-hidden-video";
 
@@ -32,14 +32,14 @@ const scenes: Record<
     style?: React.CSSProperties;
   }
 > = {
-  homepage: {
-    label: "Homepage",
-    title: "Bring your product to life",
+  docs: {
+    label: "Docs",
+    title: "Transparent avatar on docs",
     subtitle: "A live avatar can sit inside the page instead of inside a box.",
-    className: "scene-homepage",
+    className: "scene-docs",
     style: {
       backgroundImage:
-        "linear-gradient(90deg, rgba(0,0,0,.66), rgba(0,0,0,.18)), url('/anam-homepage-background.jpg')",
+        "linear-gradient(90deg, rgba(0,0,0,.66), rgba(0,0,0,.18)), url('/anam-docs-background.jpg')",
     },
   },
   studio: {
@@ -75,14 +75,14 @@ async function fetchSessionToken(): Promise<string> {
 }
 
 function isSceneId(value: unknown): value is SceneId {
-  return value === "homepage" || value === "studio" || value === "product";
+  return value === "docs" || value === "studio" || value === "product";
 }
 
 export function TransparentAvatarExperience() {
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [scene, setScene] = useState<SceneId>("homepage");
+  const [scene, setScene] = useState<SceneId>("docs");
   const [messages, setMessages] = useState<Message[]>([]);
   const [settings, setSettings] = useState<KeySettings>(defaultKeySettings);
   const clientRef = useRef<AnamClient | null>(null);
@@ -150,39 +150,7 @@ export function TransparentAvatarExperience() {
       className={`experience ${currentScene.className}`}
       style={currentScene.style}
     >
-      <section className="hero-shell">
-        <div className="hero-copy">
-          <p className="eyebrow">Canvas chroma key</p>
-          <h1>{currentScene.title}</h1>
-          <p>{currentScene.subtitle}</p>
-
-          <div className="actions">
-            {connectionState === "connected" ? (
-              <button className="button button-light" onClick={stopSession}>
-                End session
-              </button>
-            ) : (
-              <button
-                className="button button-light"
-                disabled={connectionState === "connecting"}
-                onClick={startSession}
-              >
-                {connectionState === "connecting"
-                  ? "Connecting..."
-                  : "Start conversation"}
-              </button>
-            )}
-            <button
-              className="button button-dark"
-              onClick={() => setScene("product")}
-            >
-              Product view
-            </button>
-          </div>
-
-          {error && <p className="error-message">{error}</p>}
-        </div>
-
+      <section className="hero-shell" aria-label={currentScene.title}>
         <div className="avatar-layer" aria-live="polite">
           <GreenScreenCanvas
             videoElementId={videoElementId}
@@ -200,6 +168,26 @@ export function TransparentAvatarExperience() {
       </section>
 
       <aside className="control-dock" aria-label="Avatar controls">
+        <div className="session-actions">
+          {connectionState === "connected" ? (
+            <button className="button button-light" onClick={stopSession}>
+              End session
+            </button>
+          ) : (
+            <button
+              className="button button-light"
+              disabled={connectionState === "connecting"}
+              onClick={startSession}
+            >
+              {connectionState === "connecting"
+                ? "Connecting..."
+                : "Start conversation"}
+            </button>
+          )}
+        </div>
+
+        {error && <p className="error-message">{error}</p>}
+
         <div className="scene-switcher">
           {Object.entries(scenes).map(([id, item]) => (
             <button

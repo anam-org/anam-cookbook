@@ -29,7 +29,7 @@ Keep spoken replies short and useful.`,
           properties: {
             scene: {
               type: "string",
-              enum: ["homepage", "studio", "product"],
+              enum: ["docs", "studio", "product"],
               description: "The scene to show behind the avatar.",
             },
           },
