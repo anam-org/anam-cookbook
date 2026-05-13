@@ -1,0 +1,216 @@
+---
+title: Live avatar stream with LiveKit and Anam
+description: "Build a Twitch-style public stream where an Anam Cara 4 avatar hosts shared chat, with optional dynamic web backdrops."
+tags: [livekit, javascript, agents, avatar]
+date: 2026-05-13
+authors: [ao-anam]
+---
+
+This recipe walks through a public livestream pattern: one Anam avatar stays on
+air like a streamer, viewers join from a URL, everyone shares the same chat, and
+the avatar periodically responds to the room.
+
+The complete example is in
+[anam-org/anam-live-stream](https://github.com/anam-org/anam-live-stream). The
+repo has two modes:
+
+- **Minimal mode**: LiveKit room, Anam avatar, OpenAI Realtime host, shared chat.
+- **Dynamic mode**: everything above, plus web search, scrolling page captures,
+  generated visuals, and automatic stage layout changes.
+
+Start with minimal mode. It is cheaper, easier to debug, and the right baseline
+before adding news sources or generated backdrops.
+
+## What you'll build
+
+You will deploy:
+
+- A Next.js app on Vercel that viewers open in the browser
+- A LiveKit Cloud room that carries avatar audio/video and chat data messages
+- A LiveKit agent that starts an Anam avatar session with `avatarModel:
+  "cara-4-latest"`
+- A small rolling chat buffer so refreshes and different viewers see the same
+  recent chat
+- Optional dynamic stage production for web pages, scrolling videos, and
+  generated images
+
+## How the pieces fit together
+
+The Vercel app is the public stream surface. When a viewer opens the page, the app
+asks `/api/livekit-token` for a short-lived viewer token. That API also dispatches
+the named LiveKit agent into the shared room.
+
+The LiveKit agent waits until a real viewer is present, starts an OpenAI Realtime
+voice session, and then starts an Anam avatar session. Anam publishes the avatar
+video track into the same LiveKit room. The browser subscribes to that track and
+composites the green-screen avatar over the stage.
+
+Chat is intentionally simple. The browser sends chat over LiveKit reliable data
+messages and also stores recent messages in a Vercel Blob JSON buffer. The agent
+keeps only a short in-memory window so it can respond to fresh comments without
+pretending it remembers the whole stream.
+
+## Prerequisites
+
+- Node.js 20+
+- A Vercel account
+- A LiveKit Cloud project and the LiveKit CLI
+- An Anam API key and an avatar ID from [Anam Lab](https://lab.anam.ai)
+- An OpenAI API key for Realtime
+- Optional: Vercel Blob for persistent recent chat
+- Optional: Gemini API key for generated dynamic backdrops
+
+## Clone the example
+
+```bash
+git clone https://github.com/anam-org/anam-live-stream.git
+cd anam-live-stream
+npm install
+```
+
+Copy the web env example:
+
+```bash
+cp .env.example .env.local
+```
+
+For minimal mode, fill the LiveKit and stream identity values:
+
+```bash
+NEXT_PUBLIC_STREAM_ID=anam-live-stream
+NEXT_PUBLIC_STREAM_TITLE="Tech news stream"
+NEXT_PUBLIC_STREAM_HOST_NAME=Max
+NEXT_PUBLIC_STREAM_MODE=minimal
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your_livekit_api_key
+LIVEKIT_API_SECRET=your_livekit_api_secret
+LIVEKIT_ROOM_NAME=anam-live-stream
+LIVEKIT_AGENT_NAME=anam-live-stream-cara
+STREAM_MODE=minimal
+ENABLE_DYNAMIC_BACKDROPS=false
+BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
+STREAM_STORAGE_PREFIX=anam-live-stream
+```
+
+Run the web app:
+
+```bash
+npm run dev
+```
+
+## Configure the LiveKit agent
+
+The agent is a separate Node project:
+
+```bash
+cd agent
+npm install
+cp .env.example .env.local
+```
+
+Fill the required agent values:
+
+```bash
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your_livekit_api_key
+LIVEKIT_API_SECRET=your_livekit_api_secret
+LIVEKIT_AGENT_NAME=anam-live-stream-cara
+STREAM_APP_URL=https://your-vercel-app.vercel.app
+STREAM_MODE=minimal
+ENABLE_DYNAMIC_BACKDROPS=false
+STREAM_HOST_NAME=Max
+STREAM_TITLE="Tech news stream"
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_REALTIME_MODEL=gpt-realtime-2
+OPENAI_REALTIME_VOICE=cedar
+ANAM_API_KEY=your_anam_api_key
+ANAM_AVATAR_ID=your_anam_avatar_uuid
+ANAM_AVATAR_MODEL=cara-4-latest
+```
+
+Run it locally while your web app is open:
+
+```bash
+npm run dev
+```
+
+When a viewer joins the Vercel app, LiveKit dispatches the agent. The agent starts
+the Realtime session, creates the Anam avatar session, and publishes the avatar
+track back into the room.
+
+## Turn on dynamic mode
+
+Dynamic mode adds a second loop inside the agent: a stage producer. It reads recent
+chat, rotates through tech-news topics, searches the web for a specific source,
+captures a scrolling page or generates a visual, and sends the new stage state to
+the browser over LiveKit data messages.
+
+Enable it only after the minimal stream works:
+
+```bash
+STREAM_MODE=dynamic
+ENABLE_DYNAMIC_BACKDROPS=true
+BACKGROUND_API_SECRET=shared_secret_for_agent_background_requests
+GEMINI_API_KEY=your_gemini_key
+GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview
+OPENAI_WEB_SEARCH_MODEL=gpt-4.1-mini
+STAGE_PRODUCER_MODEL=gpt-5.5
+STREAM_VISUAL_BRAND_PROMPT="Use bold orange and electric green accents on a clean dark studio aesthetic."
+```
+
+Use the same `BACKGROUND_API_SECRET` in Vercel and in the agent. In production,
+the visual routes refuse requests when that secret is missing.
+
+## Deploy
+
+Deploy the Next.js app:
+
+```bash
+vercel deploy --prod
+```
+
+Deploy the LiveKit agent:
+
+```bash
+lk agent deploy ./agent --secrets-file=./agent/.env.local --silent
+```
+
+The app's token endpoint dispatches the configured `LIVEKIT_AGENT_NAME` whenever
+a viewer joins the stream room.
+
+## Shutdown and costs
+
+The example is built to avoid idle spend. The agent waits up to 25 seconds for a
+real viewer after dispatch. If nobody joins, it exits. After the last real viewer
+leaves, it shuts down after a short grace period.
+
+Minimal mode can still spend on LiveKit Cloud, Anam avatar minutes, and OpenAI
+Realtime while viewers are present. Dynamic mode adds OpenAI Responses/web search,
+Gemini image generation, Vercel Function runtime, browser capture time, and Blob
+storage.
+
+When testing is done, delete the room or pause the deployed agent:
+
+```bash
+lk room delete anam-live-stream
+```
+
+## Safety checklist
+
+The example includes basic public-demo safeguards:
+
+- rate limiting on viewer token creation
+- rate limiting on chat reads and writes
+- configurable chat blocklist with `CHAT_BLOCKLIST`
+- agent-side rate limiting for LiveKit data-channel chat
+- secret-protected dynamic visual routes
+- private-network blocking for page captures
+
+Before sending significant public traffic to it, add stronger moderation,
+observability, WAF/rate limiting, and an access gate for private customer demos.
+
+<Tip>
+For YouTube Live, the quickest path is to open the Vercel page in OBS as a
+browser source and stream that output. A native LiveKit Egress to RTMP setup is
+possible too, but it needs separate cost and reliability planning.
+</Tip>
