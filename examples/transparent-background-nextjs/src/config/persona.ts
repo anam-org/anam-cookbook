@@ -1,4 +1,4 @@
-const defaultVoiceId = "6bfbe25a-979d-40f3-a92b-5394170af54b";
+const defaultVoiceId = "6af524f7-68e3-4ecd-933d-c06e3d8ef9b8";
 const defaultLlmId = "0934d97d-0c3a-4f33-91b0-5e136a0ef466";
 const defaultAvatarModel = "cara-4-latest";
 
