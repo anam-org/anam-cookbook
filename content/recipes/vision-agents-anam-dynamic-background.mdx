@@ -99,7 +99,7 @@ ANAM_GREEN_EDGE_EXPAND=1
 
 ## Avatar constraints
 
-To simplify the backround replacement, we'll use a simple green screen setup, where the green screen pixels are replaced by the co-located pixels from the scene background. If you do not have an avatar with a green screen, you can use the Persona build page [Anam Lab](https://lab.anam.ai/build) to create one.
+To simplify the background replacement, we'll use a simple green screen setup, where the green screen pixels are replaced by the co-located pixels from the scene background. If you do not have an avatar with a green screen, you can use the Persona build page [Anam Lab](https://lab.anam.ai/build) to create one.
 
 On the top you'll see an option to either upload your own avatar (e.g. a headshot in front of a green screen or a generated image) or you use the text box to describe and generate a your new avatar. Make sure you specify to use a green screen background. 
 <tip> 
@@ -108,7 +108,7 @@ We found the following prompt works reliably:
 </tip>
 ![Generate an avatar in front of a green screen](/img/vision-agents/generate-avatar.png)
 
-The generated avatar will popuplate the list and should look something like this:
+The generated avatar will populate the list and should look something like this:
 ![Generated avatar in the Anam Lab](/img/vision-agents/avatar-green-screen.png)
 
 This is a good point to test if the setup is working. If all goes well, a getstream.io webpage should open and lands you immediately in a Stream call. The avatar should join the call and you should be able to have a conversation with the avatar. 
@@ -157,7 +157,7 @@ async def get_weather(location: str) -> dict[str, object]:
     return await get_weather_by_location(location)
 ```
 
-The `get_weather` function uses the baseline Vision Agents weather helper. To spice things up (pun intended), this recipe (again pun intendend) adds a tool call for providing cooking instructions.
+The `get_weather` function uses the baseline Vision Agents weather helper. To spice things up (pun intended), this recipe (again pun intended) adds a tool call for providing cooking instructions.
 
 So far, these tools are very generic, we can now add `avatar.set_scene` to the tool calls to change the scene before the assistant responds:
 
