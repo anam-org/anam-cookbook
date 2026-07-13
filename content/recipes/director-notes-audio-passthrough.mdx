@@ -94,7 +94,7 @@ segments = parse_tagged_line("[warm] Hi there. [curious] What's that noise? [lau
 
 ## Open the Cartesia stream
 
-Open one websocket context with `add_timestamps=True` and push each segment's text. Request raw 24 kHz PCM to match Anam's recommended minimum sample rate for avatar performance.
+Open one websocket context with `add_timestamps=True` and push each segment's text. Request raw 24 kHz PCM for a good latency/quality balance; Anam suggests 24000 Hz for best performance.
 
 ```python
 with cartesia.tts.websocket_connect() as ws:

@@ -5,7 +5,7 @@ Type a line of text and the Anam avatar speaks it. [Cartesia](https://cartesia.a
 - **Voice** — Cartesia's own reading of the text (Sonic interprets emotional subtext), with `[laughter]` kept inline so the voice actually laughs.
 - **Face** — each tag is sent as an Anam **Director Notes cue** over the WebRTC data channel, timed to the spoken word using Cartesia's word-level timestamps.
 
-The passthrough stream uses 24 kHz / `pcm_s16le` / mono, matching Anam's recommended minimum sample rate for avatar performance.
+The passthrough stream uses 24 kHz / `pcm_s16le` / mono, matching Anam's suggested sample rate for best performance.
 
 This is a demo script to highlight the mechanism — it is not production code.
 

@@ -78,7 +78,7 @@ class CueTimer:
 
     `feed()` each batch of word timings as it streams in and it returns any cues
     whose segment just started; call `flush()` at the end for the rest. Segment
-    words are matched forward, so stray tokens from Cartesia do not consume
+    words are matched in order, so stray tokens from Cartesia do not consume
     expected words or make later cues attach to earlier repeated words.
     `at_seconds` is relative to the start of the turn's audio.
     """
@@ -109,16 +109,10 @@ class CueTimer:
                     self._word_i = 0
                     continue  # consumes no word; try the next segment for this word
 
-                matched_at = -1
-                for idx in range(self._word_i, len(seg_words)):
-                    if w == seg_words[idx]:
-                        matched_at = idx
-                        break
-
-                if matched_at >= 0:
+                if w == seg_words[self._word_i]:
                     if self._word_i == 0 and cue:
                         out.append((cue, round(float(start), 3)))
-                    self._word_i = matched_at + 1
+                    self._word_i += 1
                     self._last_end = end
                     if self._word_i >= len(seg_words):
                         self._i += 1
@@ -192,9 +186,10 @@ def _self_check() -> None:
     )
     assert cues3 == [("happy", 1.5)], cues3
 
-    # 6. Mid-segment stray tokens don't let a later cue attach to an earlier word.
+    # 6. Mid-segment stray tokens, even repeated later words, don't consume
+    #    expected segment words or pull the next cue earlier.
     segs4 = parse_tagged_line("[warm] I will say next. [surprised] Next cue.")
-    words4 = ["I", "uh", "will", "say", "next", "Next", "cue"]
+    words4 = ["I", "next", "will", "say", "next", "Next", "cue"]
     starts4 = [0.0, 0.2, 0.4, 0.7, 1.0, 1.3, 1.6]
     ends4 = [0.1, 0.3, 0.6, 0.9, 1.2, 1.5, 1.9]
     cues4 = anchor_cues(segs4, words4, starts4, ends4)
