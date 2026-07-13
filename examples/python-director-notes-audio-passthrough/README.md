@@ -5,7 +5,7 @@ Type a line of text and the Anam avatar speaks it. [Cartesia](https://cartesia.a
 - **Voice** — Cartesia's own reading of the text (Sonic interprets emotional subtext), with `[laughter]` kept inline so the voice actually laughs.
 - **Face** — each tag is sent as an Anam **Director Notes cue** over the WebRTC data channel, timed to the spoken word using Cartesia's word-level timestamps.
 
-The whole pipeline runs at 16 kHz / `pcm_s16le` / mono, so there is no resampling.
+The passthrough stream uses 24 kHz / `pcm_s16le` / mono, matching Anam's recommended minimum sample rate for avatar performance.
 
 This is a demo script to highlight the mechanism — it is not production code.
 
@@ -50,11 +50,11 @@ The avatar video shows in an OpenCV window (press `q` to quit); its audio plays 
 
 `[happy] [warm] [playful] [curious] [supportive] [concerned] [sad] [surprised] [angry] [distressed] [laughter]`
 
-A tag applies from where it appears until the next tag. Unknown tags are spoken as normal text and emit no cue.
+A known tag applies from where it appears until the next known tag. Unknown tags are spoken as normal text and emit no cue.
 
 ## How it works
 
-1. `parse_tagged_line()` splits your line into segments at each `[tag]`.
+1. `parse_tagged_line()` splits your line into segments at each known `[tag]`.
 2. `_stream_turn()` opens one Cartesia websocket context with `add_timestamps=True` and pushes each segment's text. Cartesia streams audio chunks and word timestamps back interleaved.
 3. As chunks arrive they're forwarded to `session.create_agent_audio_input_stream()` for lip-sync; as word timestamps arrive, `CueTimer` emits each face cue and it's sent with `session.send_director_note_cue(tag, at_seconds=...)` — so the face lands on the word and the avatar starts speaking almost immediately.
 4. Cartesia's client is synchronous, so `_stream_turn` runs in a worker thread and bridges each async Anam send back to the event loop with `asyncio.run_coroutine_threadsafe(...)`.
@@ -69,7 +69,7 @@ A tag applies from where it appears until the next tag. Unknown tags are spoken 
 | Method | Purpose |
 | --- | --- |
 | `PersonaConfig(avatar_model="cara-4", enable_audio_passthrough=True, director_notes=DirectorNotes(...))` | Enable passthrough + a baseline performance style |
-| `session.create_agent_audio_input_stream(AgentAudioInputConfig(encoding="pcm_s16le", sample_rate=16000, channels=1))` | Open the passthrough audio stream |
+| `session.create_agent_audio_input_stream(AgentAudioInputConfig(encoding="pcm_s16le", sample_rate=24000, channels=1))` | Open the passthrough audio stream |
 | `agent.send_audio_chunk(pcm)` / `agent.end_sequence()` | Feed PCM for lip-sync / end the turn |
 | `session.send_director_note_cue(tag, at_seconds=...)` | Steer the face over the data channel |
 | Cartesia `ws.context(..., add_timestamps=True)` / `ctx.push(text)` | Stream TTS with word timings |

@@ -43,20 +43,24 @@ class Segment:
 
 
 def parse_tagged_line(text: str) -> list[Segment]:
-    """Split `text` at each `[tag]` into ordered Segments.
+    """Split `text` at each known `[tag]` into ordered Segments.
 
     Text before the first tag becomes a neutral (tag=None) opener. A trailing
-    tag with no following words (e.g. "...amazing! [laughter]") is kept so the
-    avatar can react at the end of the turn.
+    known tag with no following words (e.g. "...amazing! [laughter]") is kept
+    so the avatar can react at the end of the turn. Unknown bracketed words are
+    left in the spoken text.
     """
     segments: list[Segment] = []
     pos = 0
     current: str | None = None
     for m in _TAG_RE.finditer(text):
+        tag = m.group(1).lower()
+        if tag not in ANAM_CUE_TAGS:
+            continue
         chunk = text[pos:m.start()].strip()
         if chunk or current is not None:
             segments.append(Segment(current, chunk))
-        current = m.group(1).lower()
+        current = tag
         pos = m.end()
     tail = text[pos:].strip()
     if tail or current is not None:
@@ -73,16 +77,10 @@ class CueTimer:
     """Turn a stream of Cartesia word timestamps into ordered face cues.
 
     `feed()` each batch of word timings as it streams in and it returns any cues
-    whose segment just started; call `flush()` at the end for the rest. Each
-    segment's cue is anchored to the start time of its first spoken word, found
-    by matching *forward* through the word stream so a stray non-verbal token
-    (e.g. Cartesia emitting "laughs" for our inline `[laughter]`) never desyncs
-    the cues. `at_seconds` is relative to the start of the turn's audio.
-
-    # ponytail: forward word-matching, not an exact index. Cartesia's tokenizer
-    # (contractions, non-verbals) needn't match ours 1:1; matching real words
-    # forward tolerates the drift. If cues ever land a word early/late, this is
-    # the knob — anchoring at sentence starts keeps it visually imperceptible.
+    whose segment just started; call `flush()` at the end for the rest. Segment
+    words are matched forward, so stray tokens from Cartesia do not consume
+    expected words or make later cues attach to earlier repeated words.
+    `at_seconds` is relative to the start of the turn's audio.
     """
 
     def __init__(self, segments: list[Segment]) -> None:
@@ -90,8 +88,8 @@ class CueTimer:
             (seg.face_cue, [w for w in (_norm(x) for x in seg.text.split()) if w])
             for seg in segments
         ]
-        self._i = 0          # next segment to start
-        self._remaining = 0  # words left to consume in the current segment
+        self._i = 0          # current segment
+        self._word_i = 0     # next expected word inside the current segment
         self._last_end = 0.0  # end time of the last consumed word
 
     def feed(
@@ -102,25 +100,31 @@ class CueTimer:
             w = _norm(raw)
             if not w:
                 continue
-            if self._remaining > 0:  # still inside the current segment
-                self._remaining -= 1
-                self._last_end = end
-                continue
             while self._i < len(self._segs):
                 cue, seg_words = self._segs[self._i]
                 if not seg_words:  # empty-text cue (e.g. trailing [laughter])
                     if cue:
                         out.append((cue, round(self._last_end, 3)))
                     self._i += 1
+                    self._word_i = 0
                     continue  # consumes no word; try the next segment for this word
-                if w == seg_words[0]:  # the segment starts on this word
-                    if cue:
+
+                matched_at = -1
+                for idx in range(self._word_i, len(seg_words)):
+                    if w == seg_words[idx]:
+                        matched_at = idx
+                        break
+
+                if matched_at >= 0:
+                    if self._word_i == 0 and cue:
                         out.append((cue, round(float(start), 3)))
-                    self._remaining = len(seg_words) - 1
+                    self._word_i = matched_at + 1
                     self._last_end = end
-                    self._i += 1
+                    if self._word_i >= len(seg_words):
+                        self._i += 1
+                        self._word_i = 0
                     break
-                break  # stray token between segments; skip this word, keep segment
+                break  # stray token; skip this word, keep current segment state
         return out
 
     def flush(self) -> list[tuple[str, float]]:
@@ -173,19 +177,30 @@ def _self_check() -> None:
     cues2 = anchor_cues(segs2, words2, starts2, ends2)
     assert cues2 == [("warm", 0.0), ("surprised", 0.9)], cues2
 
-    # 5. Unknown tags speak but emit no face cue; neutral opener has no cue
+    # 5. Unknown tags stay in spoken text; neutral opener has no cue
     segs3 = parse_tagged_line("Hello there. [wibble] general. [happy] good news!")
-    assert segs3[0].tag is None and segs3[0].face_cue is None
-    assert segs3[1].face_cue is None  # "wibble" not a known cue
+    assert [(s.tag, s.text) for s in segs3] == [
+        (None, "Hello there. [wibble] general."),
+        ("happy", "good news!"),
+    ], segs3
+    assert segs3[0].cartesia_text() == "Hello there. [wibble] general."
     cues3 = anchor_cues(
         segs3,
-        ["Hello", "there", "general", "good", "news"],
-        [0.0, 0.3, 0.7, 1.1, 1.4],
-        [0.3, 0.6, 1.0, 1.4, 1.8],
+        ["Hello", "there", "wibble", "general", "good", "news"],
+        [0.0, 0.3, 0.7, 1.1, 1.5, 1.8],
+        [0.3, 0.6, 1.0, 1.4, 1.8, 2.2],
     )
-    assert cues3 == [("happy", 1.1)], cues3
+    assert cues3 == [("happy", 1.5)], cues3
 
-    # 6. Streaming: feeding words in batches matches a one-shot pass, and a cue
+    # 6. Mid-segment stray tokens don't let a later cue attach to an earlier word.
+    segs4 = parse_tagged_line("[warm] I will say next. [surprised] Next cue.")
+    words4 = ["I", "uh", "will", "say", "next", "Next", "cue"]
+    starts4 = [0.0, 0.2, 0.4, 0.7, 1.0, 1.3, 1.6]
+    ends4 = [0.1, 0.3, 0.6, 0.9, 1.2, 1.5, 1.9]
+    cues4 = anchor_cues(segs4, words4, starts4, ends4)
+    assert cues4 == [("warm", 0.0), ("surprised", 1.3)], cues4
+
+    # 7. Streaming: feeding words in batches matches a one-shot pass, and a cue
     #    is emitted as soon as its segment's first word arrives.
     timer = CueTimer(parse_tagged_line("[warm] Hi there. [surprised] Surprised me."))
     got = timer.feed(["Hi", "there"], [0.0, 0.3], [0.3, 0.6])

@@ -9,7 +9,7 @@ it via audio passthrough as it arrives. The tags drive both the voice and face:
   - FACE:  sent as Anam Director Notes cues over the WebRTC data channel, timed
     to the spoken word using Cartesia's word-level timestamps (at_seconds).
 
-Everything runs at 16 kHz / pcm_s16le / mono, so no resampling is needed.
+Everything runs at 24 kHz / pcm_s16le / mono.
 
 Usage:
     uv run python main.py                       # interactive: type lines to speak
@@ -37,7 +37,7 @@ from cues import CueTimer, parse_tagged_line
 _ = load_dotenv()
 
 DEFAULT_AVATAR_ID = "071b0286-4cce-4808-bee2-e642f1062de3"  # stock "Liv"
-SAMPLE_RATE = 16000  # Cartesia output == Anam passthrough input; no resampling
+SAMPLE_RATE = 24000
 CHANNELS = 1
 PCM_BYTES_PER_SAMPLE = 2  # pcm_s16le
 RETURN_TO_NEUTRAL_SECONDS = 2.0
@@ -227,10 +227,12 @@ async def run(
             loop = asyncio.get_running_loop()
             # Stream Cartesia -> Anam in a worker thread: audio chunks and cues are
             # forwarded as they arrive, so the avatar starts speaking almost at once.
-            audio_bytes_sent = await loop.run_in_executor(
-                None, _stream_turn, cartesia, session, agent, segments, voice_id, model_id, loop
-            )
-            await agent.end_sequence()
+            try:
+                audio_bytes_sent = await loop.run_in_executor(
+                    None, _stream_turn, cartesia, session, agent, segments, voice_id, model_id, loop
+                )
+            finally:
+                await agent.end_sequence()
             return audio_bytes_sent / (SAMPLE_RATE * CHANNELS * PCM_BYTES_PER_SAMPLE)
 
     async with session:

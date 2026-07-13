@@ -29,7 +29,7 @@ Director Notes require a **cara-4 avatar** (`avatar_model="cara-4"`) — older m
 A Python script that:
 
 - Accepts a typed line (optionally annotated with `[tags]`) and splits it into expression segments
-- Streams it from Cartesia Sonic 3.5 as 16 kHz PCM, with word timestamps
+- Streams it from Cartesia Sonic 3.5 as 24 kHz PCM, with word timestamps
 - Forwards the audio to the avatar as it arrives (audio passthrough)
 - Fires Director Notes cues over the data channel as each word streams in, aligned to the spoken word
 
@@ -85,7 +85,7 @@ The baseline `director_notes` style sets the avatar's default presence for the w
 
 ## Parse the line into segments
 
-Split the typed line at each `[tag]`. Each segment carries the tag (for the face) and clean spoken text. `[laughter]` is kept inline so Cartesia's voice actually laughs.
+Split the typed line at each known `[tag]`. Each segment carries the tag (for the face) and clean spoken text. `[laughter]` is kept inline so Cartesia's voice actually laughs.
 
 ```python
 segments = parse_tagged_line("[warm] Hi there. [curious] What's that noise? [laughter]")
@@ -94,14 +94,14 @@ segments = parse_tagged_line("[warm] Hi there. [curious] What's that noise? [lau
 
 ## Open the Cartesia stream
 
-Open one websocket context with `add_timestamps=True` and push each segment's text. Request raw 16 kHz PCM so it drops straight into passthrough with no resampling.
+Open one websocket context with `add_timestamps=True` and push each segment's text. Request raw 24 kHz PCM to match Anam's recommended minimum sample rate for avatar performance.
 
 ```python
 with cartesia.tts.websocket_connect() as ws:
     ctx = ws.context(
         model_id="sonic-3.5",
         voice={"mode": "id", "id": voice_id},
-        output_format={"container": "raw", "encoding": "pcm_s16le", "sample_rate": 16000},
+        output_format={"container": "raw", "encoding": "pcm_s16le", "sample_rate": 24000},
         language="en",
         add_timestamps=True,
     )
@@ -129,7 +129,7 @@ Drain Cartesia: forward each audio chunk to the passthrough stream as it arrives
 from anam.types import AgentAudioInputConfig
 
 agent = session.create_agent_audio_input_stream(
-    AgentAudioInputConfig(encoding="pcm_s16le", sample_rate=16000, channels=1)
+    AgentAudioInputConfig(encoding="pcm_s16le", sample_rate=24000, channels=1)
 )
 timer = CueTimer(segments)
 
