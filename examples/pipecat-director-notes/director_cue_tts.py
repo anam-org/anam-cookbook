@@ -5,7 +5,7 @@ the current speech turn. We leave the inline ``[tag]`` cues in the text we send 
 Cartesia; Cartesia (sonic-3.5) streams word-level timestamps *as it generates
 audio* — before playback — and echoes each inline ``[tag]`` marker back in that
 stream at the moment it is spoken. So we read the marker's start time straight from
-``add_word_timestamps`` and send the cue to the engine ahead of time. No stripping,
+``add_word_timestamps`` and send the cue to Anam ahead of time. No stripping,
 no anchor word, no matching — Cartesia does the timing for us.
 
 The tag extraction lives in ``cues.py``; this file is the Pipecat glue.

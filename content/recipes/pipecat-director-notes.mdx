@@ -1,6 +1,6 @@
 ---
 title: Director-note cues with Pipecat, timed to word timings
-description: "Make an Anam avatar perform on cue inside a Pipecat pipeline — write inline director notes, let Cartesia time them for you, and send them to the engine over the data channel."
+description: "Make an Anam avatar perform on cue inside a Pipecat pipeline — write inline director notes, let Cartesia time them for you, and send them to Anam over the data channel."
 tags: [python, pipecat, director-notes, avatar]
 date: 2026-07-12
 authors: [sr-anam]
@@ -20,7 +20,7 @@ A cue over the data channel is a small JSON message:
 { "message_type": "director_note_cue", "cue": { "tag": "laughter" }, "at_seconds": 1.2 }
 ```
 
-`at_seconds` is an offset **from the start of the current speech turn**. So to land a laugh on the word "hilarious", you need to know *when* the avatar will say "hilarious" — before it says it, with enough lead time for the message to reach the engine.
+`at_seconds` is an offset **from the start of the current speech turn**. So to land a laugh on the word "hilarious", you need to know *when* the avatar will say "hilarious" — before it says it, with enough lead time for the message to reach Anam.
 
 ## Cartesia hands you the timing
 
@@ -74,7 +74,7 @@ Write the tag in square brackets **just before the word it should land on**. It 
 "Hi [warm] there! [concerned] Honestly, that story was [laughter] hilarious."
 ```
 
-The system prompt teaches the LLM the tag vocabulary and the glue rule, so it can add its own cues as the conversation goes.
+The system prompt teaches the LLM the tag vocabulary and where to place cues (just before the word), so it can add its own as the conversation goes.
 
 ## Wiring it up
 
@@ -93,7 +93,7 @@ transport = AnamTransport(
 
 tts = DirectorCueCartesiaTTSService(
     api_key=os.environ["CARTESIA_API_KEY"],
-    on_cue=transport.send_director_note_cue,   # cue → engine, over the data channel
+    on_cue=transport.send_director_note_cue,   # cue → Anam, over the data channel
     settings=CartesiaTTSService.Settings(voice="e8e5fffb-252c-436d-b842-8879b84445b6"),
 )
 ```
@@ -109,7 +109,7 @@ cp .env.example .env   # add your keys and DAILY_ROOM_URL
 uv run python bot.py
 ```
 
-Open your `DAILY_ROOM_URL` in a browser to join. On connect the avatar speaks a scripted greeting with cues so you can see them fire; after that the LLM adds its own (it's told the tag vocabulary in the system prompt).
+Open your `DAILY_ROOM_URL` in a browser to join. On connect the avatar opens with a short LLM greeting — primed to use a cue so you can see one fire — and adds more as the conversation goes (it's told the tag vocabulary in the system prompt).
 
 ## Caveats
 
@@ -117,4 +117,5 @@ Open your `DAILY_ROOM_URL` in a browser to join. On connect the avatar speaks a 
 - **Cartesia sees the tags too.** The markers go to Cartesia unchanged. An emotion tag it doesn't recognise (`[warm]`, `[concerned]`, …) is absorbed into the word as a timing marker with negligible audio effect; a non-verbal it *does* know — notably `[laughter]` — it will also render in the voice. Usually a plus (voice and face align), but test your tag set, and expect the markers to show up in the assistant transcript.
 - **A spaced tag takes its own slot.** `[tag] word` comes back as its own token — its start is the cue's `at_seconds`, a beat ahead of the word, with a short slot in the audio. Glue it (`[tag]word`) and Cartesia folds it into the word with no gap instead; the code reads both.
 - **One turn, one context.** `at_seconds` is relative to the turn's Cartesia context, which spans the whole turn (`reuse_context_id_within_turn`). The echoed start times are already in that frame — nothing to reset.
+- **Cues need a live session.** `send_director_note_cue` raises if the Anam session isn't active yet, so the demo runs its opening LLM turn from `on_avatar_connected` — which fires only after the session is up (reactive turns are naturally post-connection). `_fire` still wraps the call in a try/except, so a cue that races a session drop is logged and skipped, never fatal.
 - **Provider-specific.** This leans on Cartesia echoing inline markers in its timestamps (verified on `sonic-3.5`). A TTS that strips unknown markers, or omits them from timestamps, won't work this way — you'd fall back to matching a cue against a neighbouring word's timing.

@@ -1,14 +1,14 @@
 # Pipecat director-note cues, timed to Cartesia word timestamps
 
 A Pipecat voice agent whose Anam avatar *performs* the reply: inline `[tag]` cues
-in the assistant text are sent to the Anam engine over the data channel, each
+in the assistant text are sent to Anam over the data channel, each
 timed to the word it precedes.
 
 **How:** the `[tag]` cues are sent to Cartesia unchanged. Cartesia (sonic-3.5)
 echoes each inline marker back in its word timestamps at the moment it's spoken —
 `[happy]` comes back as its own token timed to where it sits. A `CartesiaTTSService`
 subclass reads that start time and calls `AnamTransport.send_director_note_cue(tag,
-at_seconds=...)`, so the cue reaches the engine ahead of the audio and the avatar
+at_seconds=...)`, so the cue reaches Anam ahead of the audio and the avatar
 hits it on the word. No stripping, no anchor word, no matching.
 
 - `cues.py` — the cue-tag vocabulary + pulling tags out of Cartesia tokens (pure; `python cues.py` self-checks).
@@ -29,7 +29,7 @@ hits it on the word. No stripping, no anchor word, no matching.
 
 ```bash
 cd examples/pipecat-director-notes
-uv sync            # add --prerelease=allow if uv complains about alpha deps
+uv sync
 cp .env.example .env
 # edit .env with your keys and DAILY_ROOM_URL
 ```
@@ -40,9 +40,9 @@ cp .env.example .env
 uv run python bot.py
 ```
 
-Open your `DAILY_ROOM_URL` in a browser to join. On connect the avatar speaks a
-scripted greeting so you can see the cues fire (`[warm]`, `[concerned]`,
-`[laughter]`); after that, the LLM may add its own cues as the conversation goes.
+Open your `DAILY_ROOM_URL` in a browser to join. On connect the avatar opens with a
+short LLM greeting (primed to use a cue) so you can see one fire; after that it keeps
+adding cues as the conversation goes.
 
 ## Author cues
 
