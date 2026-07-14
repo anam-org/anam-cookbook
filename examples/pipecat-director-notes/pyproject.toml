@@ -1,0 +1,18 @@
+[project]
+name = "pipecat-director-notes"
+version = "0.1.0"
+description = "Pipecat + Anam: director-note cues timed to Cartesia word timestamps"
+# pipecat-ai 1.x (the API this example uses) requires Python >=3.11; on 3.10 the
+# resolver falls back to the 0.0.x line, whose LLMContext APIs differ.
+requires-python = ">=3.11"
+dependencies = [
+    # This example overrides Pipecat internals for cue timing; keep these pinned
+    # until the subclass is re-checked against newer Pipecat / Anam adapter APIs.
+    "pipecat-anam==0.2.0a2",
+    "pipecat-ai[cartesia,daily,deepgram,openai]==1.5.0",
+    "python-dotenv==1.2.2",
+]
+
+[tool.uv]
+package = false
+prerelease = "allow"

@@ -34,6 +34,11 @@ next-env.d.ts
 *.swp
 *.swo
 
+# Python (examples/)
+__pycache__/
+*.py[cod]
+.venv/
+
 # OS
 .DS_Store
 Thumbs.db
