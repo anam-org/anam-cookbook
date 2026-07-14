@@ -28,6 +28,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
 # IDE
 .idea/
 .vscode/

@@ -10,7 +10,7 @@ authors: [robbie-anam]
 
 ## Overview
 
-Anam's server-side ElevenLabs integration connects the Anam Engine directly to an ElevenLabs Conversational AI agent. Instead of bridging audio between two SDKs in the browser, you pass a signed URL when creating an Anam session token and the Engine handles the rest.
+Anam's server-side ElevenLabs integration connects Anam directly to an ElevenLabs Conversational AI agent. Instead of bridging audio between two SDKs in the browser, you pass a signed URL when creating an Anam session token and Anam handles the rest.
 
 Your client code gets simpler (no audio bridging, no microphone management, no muting the ElevenLabs speaker). Latency drops because audio flows server-to-server instead of through the browser. And you get session recordings and transcripts in Anam Lab, which the client-side approach can't provide.
 
@@ -32,7 +32,7 @@ All of this configuration happens in the [ElevenLabs agent dashboard](https://el
 
 ## How it works
 
-The ElevenLabs connection moves out of the browser and into the Anam Engine:
+The ElevenLabs connection moves out of the browser and into Anam:
 
 ```
 Server:
@@ -158,10 +158,10 @@ export async function POST(request: Request) {
 }
 ```
 
-The only difference from a standard Anam session token is the `environment.elevenLabsAgentSettings` field. This tells the Engine to connect to the ElevenLabs agent instead of running Anam's built-in STT/LLM/TTS pipeline.
+The only difference from a standard Anam session token is the `environment.elevenLabsAgentSettings` field. This tells Anam to connect to the ElevenLabs agent instead of running Anam's built-in STT/LLM/TTS pipeline.
 
 <Info>
-The signed URL is short-lived (typically valid for 15 minutes). The Anam Engine uses it immediately when the client connects, so there's no issue with expiry in normal usage. If you're pre-fetching tokens, create them just before the client needs them.
+The signed URL is short-lived (typically valid for 15 minutes). Anam uses it immediately when the client connects, so there's no issue with expiry in normal usage. If you're pre-fetching tokens, create them just before the client needs them.
 </Info>
 
 ## Per-session customisation
@@ -286,7 +286,7 @@ const client = createClient(sessionToken);
 await client.streamToVideoElement("avatar-video");
 ```
 
-No ElevenLabs SDK, no audio bridging, no microphone management. The Engine handles the conversation.
+No ElevenLabs SDK, no audio bridging, no microphone management. Anam handles the conversation.
 
 ### Working component example
 
