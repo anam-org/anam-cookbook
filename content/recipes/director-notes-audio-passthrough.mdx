@@ -148,7 +148,7 @@ await agent.end_sequence()
 ```
 
 <Tip>
-Cues can be sent early — the engine latches each onto the persona speech turn that begins within ~1 second, and `at_seconds` sequences them across the turn so each lands on its word. Streaming audio faster than realtime is fine: Anam buffers it and paces playback, and because Cartesia streams faster than realtime each cue reaches the engine before its word renders. `end_sequence()` returns the avatar to a neutral listening pose.
+Cues can be sent early — Anam latches each onto the persona speech turn that begins within ~1 second, and `at_seconds` sequences them across the turn so each lands on its word. Streaming audio faster than realtime is fine: Anam buffers it and paces playback, and because Cartesia streams faster than realtime each cue reaches Anam before its word renders. `end_sequence()` returns the avatar to a neutral listening pose.
 </Tip>
 
 <Tip>
