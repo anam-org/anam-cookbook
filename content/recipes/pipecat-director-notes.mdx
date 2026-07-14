@@ -1,7 +1,7 @@
 ---
 title: Director-note cues with Pipecat, timed to word timings
 description: "Make an Anam avatar perform on cue inside a Pipecat pipeline — write inline director notes, let Cartesia time them for you, and send them to the engine over the data channel."
-tags: [python, pipecat, director-notes, cartesia, avatar]
+tags: [python, pipecat, director-notes, avatar]
 date: 2026-07-12
 authors: [sr-anam]
 ---
@@ -24,7 +24,7 @@ A cue over the data channel is a small JSON message:
 
 ## Cartesia hands you the timing
 
-Here's the shortcut: Cartesia (Sonic) accepts inline `[tag]` markers in the transcript and **echoes them straight back in its word timestamps**, each stamped with the moment it's spoken. One turn is one Cartesia context, so those offsets are already turn-relative — exactly your `at_seconds`.
+Here's the shortcut: Cartesia (Sonic) accepts inline `[tag]` markers in the transcript and **echoes them straight back in its word timestamps**, each stamped with the moment it's spoken, with respect to the TTS audio this turn. One turn is one Cartesia context, so those offsets are already turn-relative — exactly your `at_seconds`.
 
 Send `"Hello [laughter] everyone today."` with `add_timestamps` on, and the timestamps come back like this:
 
