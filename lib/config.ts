@@ -47,13 +47,14 @@ export const topics: TopicConfig[] = [
     gradient: 'linear-gradient(135deg, #D4728A 0%, #E8B4C0 50%, #F9ECE4 100%)',
   },
   { name: 'Director Notes', slug: 'director-notes', gradient: 'linear-gradient(135deg, #ebedf8 0%, #b0b5e8 50%, #6f79cf 100%)' },
-    { name: 'Pipecat', slug: 'pipecat', gradient: 'linear-gradient(135deg, #f8ebf8 0%, #e8b0e2 50%, #cf6fcf 100%)' },
+  { name: 'Pipecat', slug: 'pipecat', gradient: 'linear-gradient(135deg, #f8ebf8 0%, #e8b0e2 50%, #cf6fcf 100%)' },
 ];
 
 // Slugs of featured cookbooks to show in the "Featured Cookbooks" section
 // Order matters - first items appear first
 export const featuredRecipeSlugs: string[] = [
   'pipecat-director-notes',
+  'director-notes-audio-passthrough',
   'basic-nextjs-app',
   'livekit-avatar-livestream',
   'gemini-vision-with-anam-livekit',

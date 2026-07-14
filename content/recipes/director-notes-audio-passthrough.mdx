@@ -1,0 +1,175 @@
+---
+title: Expressive audio passthrough with Director Notes cues
+description: "Drive an Anam avatar's voice and face from one annotated line of text — Cartesia Sonic 3.5 for the voice, Director Notes cues over the data channel for the face, kept in sync with word timestamps."
+tags: [python, audio-passthrough, director-notes, tts]
+difficulty: intermediate
+sdk: python
+date: 2026-07-11
+authors: [sr-anam]
+---
+
+In [audio passthrough](/python-audio-passthrough-tts) mode Anam runs face generation only — it never sees the persona's text, so it can't infer facial expression on its own, and there's no text to carry [Director Notes **inline cue tags**](https://docs.anam.ai/personas/director-notes) like `[warm]` or `[surprised]`. Instead, you send those same cues as `director_note_cue` messages over the WebRTC data channel to steer the avatar's face during a turn.
+
+This recipe combines three things into one Python script:
+
+- **Cartesia Sonic 3.5** synthesises the speech for the **voice** — Sonic reads the emotional subtext of the text, and `[laughter]` stays inline so it laughs.
+- **Audio passthrough** streams that PCM into Anam for lip-sync.
+- **Director Notes cues** steer the **face**, timed to the spoken word using Cartesia's word-level timestamps.
+
+The neat part: **one annotated line drives the whole performance.** You write `[warm] Come closer. [surprised] Wait — what was that? [laughter] Oh, it's nothing.` — the tags steer the face, `[laughter]` makes the voice laugh too, and Sonic reads the rest from the words.
+
+The complete code is at [examples/python-director-notes-audio-passthrough](https://github.com/anam-org/anam-cookbook/tree/main/examples/python-director-notes-audio-passthrough).
+
+<Warning>
+Director Notes require a **cara-4 avatar** (`avatar_model="cara-4"`) — older models ignore the cues. `send_director_note_cue` also only exists in **`anam` ≥ 0.7.0a1**, so this example installs a prerelease. Audio passthrough and Director Notes are both **Beta**.
+</Warning>
+
+## What you'll build
+
+A Python script that:
+
+- Accepts a typed line (optionally annotated with `[tags]`) and splits it into expression segments
+- Streams it from Cartesia Sonic 3.5 as 24 kHz PCM, with word timestamps
+- Forwards the audio to the avatar as it arrives (audio passthrough)
+- Fires Director Notes cues over the data channel as each word streams in, aligned to the spoken word
+
+## Prerequisites
+
+- Python 3.10+ and [uv](https://docs.astral.sh/uv/)
+- An Anam API key from [lab.anam.ai](https://lab.anam.ai) and a **cara-4** avatar
+- A Cartesia API key from [cartesia.ai](https://cartesia.ai)
+
+## Project setup
+
+```bash
+git clone https://github.com/anam-org/anam-cookbook.git
+cd anam-cookbook/examples/python-director-notes-audio-passthrough
+uv sync --prerelease=allow
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```bash
+ANAM_API_KEY=your_anam_api_key
+ANAM_AVATAR_ID=your_cara4_avatar_id
+ANAM_AVATAR_MODEL=cara-4
+CARTESIA_API_KEY=your_cartesia_api_key
+CARTESIA_VOICE_ID=6ccbfb76-1fc6-48f7-b71d-91ac6298247b
+```
+
+## How the tags drive expression
+
+You author one line with the **Anam cue tags** — `[happy] [warm] [playful] [curious] [supportive] [concerned] [sad] [surprised] [angry] [distressed] [laughter]` — and they steer the **face**, sent verbatim via `send_director_note_cue`.
+
+The **voice** needs no separate tag vocabulary: Sonic 3.5 reads the emotional subtext of the words on its own, so you just synthesise the plain text. The one exception is `[laughter]` — Cartesia's documented non-verbal — which is kept inline in the transcript so the voice laughs while the face does.
+
+## Configure the persona
+
+Enable passthrough and set a baseline performance style. `avatar_model="cara-4"` is what makes Director Notes work.
+
+```python
+from anam.types import PersonaConfig, DirectorNotes
+
+persona_config = PersonaConfig(
+    avatar_id=avatar_id,
+    avatar_model="cara-4",
+    enable_audio_passthrough=True,
+    director_notes=DirectorNotes(preset_style="warm", expressivity=0.7),
+)
+```
+
+<Tip>
+The baseline `director_notes` style sets the avatar's default presence for the whole session; the cues below shift it during a specific turn on top of that. `expressivity` (0–1) dials how strongly cues are followed.
+</Tip>
+
+## Parse the line into segments
+
+Split the typed line at each known `[tag]`. Each segment carries the tag (for the face) and clean spoken text. `[laughter]` is kept inline so Cartesia's voice actually laughs.
+
+```python
+segments = parse_tagged_line("[warm] Hi there. [curious] What's that noise? [laughter]")
+# -> [Segment("warm", "Hi there."), Segment("curious", "What's that noise?"), Segment("laughter", "")]
+```
+
+## Open the Cartesia stream
+
+Open one websocket context with `add_timestamps=True` and push each segment's text. Request raw 24 kHz PCM for a good latency/quality balance; Anam suggests 24000 Hz for best performance.
+
+```python
+with cartesia.tts.websocket_connect() as ws:
+    ctx = ws.context(
+        model_id="sonic-3.5",
+        voice={"mode": "id", "id": voice_id},
+        output_format={"container": "raw", "encoding": "pcm_s16le", "sample_rate": 24000},
+        language="en",
+        add_timestamps=True,
+    )
+    for seg in segments:
+        text = seg.cartesia_text()  # "[laughter]" kept inline so the voice laughs
+        if text:
+            ctx.push(text)
+    ctx.no_more_inputs()
+```
+
+## Turn streaming timestamps into cues
+
+Audio chunks and word timestamps stream back interleaved (`resp.type` is `"chunk"` or `"timestamps"`). We don't wait for the whole line — a small `CueTimer` consumes the timestamps as they arrive and emits each face cue the moment its segment's first word appears. It matches *forward* through the word stream, so a stray non-verbal token (Cartesia emitting `laughs` for your inline `[laughter]`) never desyncs the cues. `feed()` returns any cues that just started; `flush()` emits the rest at the end. (Full implementation in [`cues.py`](https://github.com/anam-org/anam-cookbook/tree/main/examples/python-director-notes-audio-passthrough).)
+
+```python
+timer = CueTimer(segments)
+new_cues = timer.feed(wt.words, wt.start, wt.end)  # -> [(tag, at_seconds), ...]
+```
+
+## Stream into the avatar
+
+Drain Cartesia: forward each audio chunk to the passthrough stream as it arrives, and fire each cue the moment `CueTimer` produces it. The avatar starts speaking almost immediately instead of waiting for the whole line to synthesise.
+
+```python
+from anam.types import AgentAudioInputConfig
+
+agent = session.create_agent_audio_input_stream(
+    AgentAudioInputConfig(encoding="pcm_s16le", sample_rate=24000, channels=1)
+)
+timer = CueTimer(segments)
+
+for resp in ctx.receive():
+    if resp.type == "chunk" and resp.audio:
+        await agent.send_audio_chunk(resp.audio)                 # forward as it arrives
+    elif resp.type == "timestamps" and resp.word_timestamps:
+        wt = resp.word_timestamps
+        for tag, at in timer.feed(wt.words, wt.start, wt.end):
+            await session.send_director_note_cue(tag, at_seconds=at)
+
+for tag, at in timer.flush():
+    await session.send_director_note_cue(tag, at_seconds=at)
+
+await agent.end_sequence()
+```
+
+<Tip>
+Cues can be sent early — Anam latches each onto the persona speech turn that begins within ~1 second, and `at_seconds` sequences them across the turn so each lands on its word. Streaming audio faster than realtime is fine: Anam buffers it and paces playback, and because Cartesia streams faster than realtime each cue reaches Anam before its word renders. `end_sequence()` returns the avatar to a neutral listening pose.
+</Tip>
+
+<Tip>
+Cartesia's Python client is synchronous, so in the example these `await`s run in a worker thread that bridges each send back to the event loop with `asyncio.run_coroutine_threadsafe(...)`. See [`main.py`](https://github.com/anam-org/anam-cookbook/tree/main/examples/python-director-notes-audio-passthrough) for the wiring.
+</Tip>
+
+## Run it
+
+```bash
+# Interactive: type lines, the avatar speaks each one
+uv run python main.py
+
+# One-shot
+uv run python main.py --text "[warm] Come closer. [surprised] Wait — what was that? [laughter] Oh, it's nothing."
+```
+
+The avatar appears in an OpenCV window, lip-syncing to the Cartesia audio, and its face shifts on each cue word — brightening on `[happy]`, widening on `[surprised]`, laughing on `[laughter]`.
+
+## Terminology
+
+- **Audio passthrough** – you supply the speech audio (your own TTS); Anam only renders the face.
+- **Director Notes** – a baseline *style* for the session plus *cues* that steer emotion or delivery during a turn.
+
+In this recipe the voice comes from Cartesia and the facial performance from Director Notes cues — both driven by the same tags, kept in sync by Cartesia's word timestamps.
