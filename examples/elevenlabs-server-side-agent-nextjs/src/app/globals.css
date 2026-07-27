@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+:root {
+  --black: #000000;
+  --white: #ffffff;
+  --gray: #808080;
+  --gray-light: #f5f5f5;
+  --accent: #ff6200;
+
+  --background: #f5f5f5;
+  --foreground: var(--black);
+  --muted: var(--gray);
+  --muted-foreground: var(--gray-light);
+  --accent-color: var(--accent);
+}
+
+@theme inline {
+  /* Colors */
+  --color-black: var(--black);
+  --color-white: var(--white);
+  --color-gray: var(--gray);
+  --color-gray-light: var(--gray-light);
+  --color-accent: var(--accent);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--accent);
+  --color-border: var(--gray);
+
+  /* Fonts */
+  --font-sans: var(--font-inter);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  /* Prevent zoom on input focus iOS */
+  -webkit-text-size-adjust: 100%;
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  /* Support for notched devices */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  /* Prevent overscroll bounce */
+  overscroll-behavior-y: none;
+}
+
+/* Utilities for safe areas */
+.safe-area-inset {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* Touch optimizations */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Fix for iOS input zoom */
+input,
+textarea,
+select {
+  font-size: 16px;
+}
