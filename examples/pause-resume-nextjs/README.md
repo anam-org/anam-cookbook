@@ -92,5 +92,5 @@ This is a client-side workaround, not a true transport-level pause. Resuming sta
 
 ## Learn more
 
-- [Anam Documentation](https://anam.ai/docs/overview)
+- [Anam Documentation](https://anam.ai/docs/introduction/overview)
 - [JavaScript SDK Reference](https://anam.ai/docs/javascript-sdk/reference/basic-usage)
