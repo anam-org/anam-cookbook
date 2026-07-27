@@ -10,9 +10,9 @@ authors: [robbie-anam]
 
 ## Overview
 
-Anam's server-side ElevenLabs integration connects Anam directly to an ElevenLabs Conversational AI agent. Instead of bridging audio between two SDKs in the browser, you pass a signed URL when creating an Anam session token and Anam handles the rest.
+Anam's server-side ElevenLabs integration connects an Anam avatar to an ElevenLabs Conversational AI agent. Your server fetches a short-lived ElevenLabs signed URL and includes it when creating an Anam session token.
 
-Your client code gets simpler (no audio bridging, no microphone management, no muting the ElevenLabs speaker). Latency drops because audio flows server-to-server instead of through the browser. And you get session recordings and transcripts in Anam Lab, which the client-side approach can't provide.
+The browser uses the Anam JavaScript SDK to start the WebRTC session and render the avatar. Anam sends conversation audio to ElevenLabs, receives the generated speech, and keeps the avatar in sync. API keys stay on the server, and completed sessions include recordings and transcripts in Anam Lab.
 
 The complete example code is available at [examples/elevenlabs-server-side-agent-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/elevenlabs-server-side-agent-nextjs).
 
@@ -32,7 +32,7 @@ All of this configuration happens in the [ElevenLabs agent dashboard](https://el
 
 ## How it works
 
-The ElevenLabs connection moves out of the browser and into Anam:
+The session is split between your Next.js server, the browser, and Anam's engine:
 
 ```
 Server:
@@ -52,7 +52,7 @@ Engine (automatic):
   9. Client tool calls and results forwarded over the same connection
 ```
 
-Your client code looks the same as a standard Anam turnkey integration. All the ElevenLabs-specific logic is in the session token creation on the server.
+The Next.js route supplies the ElevenLabs settings when it creates the session token. The browser receives that token and uses the Anam JavaScript SDK to start the avatar stream.
 
 ## Prerequisites
 
@@ -169,7 +169,7 @@ export async function POST(request: Request) {
 }
 ```
 
-The `environment.elevenLabsAgentSettings` field tells Anam to connect to the ElevenLabs agent instead of running Anam's built-in STT/LLM/TTS pipeline. `avatarModel` and `directorNotes` enable a warm Cara 4 performance at the start of the session.
+The `environment.elevenLabsAgentSettings` field configures ElevenLabs as the session's speech recognition, language model, and text-to-speech provider. `avatarModel` and `directorNotes` enable a warm Cara 4 performance at the start of the session.
 
 <Info>
 The signed URL is short-lived (typically valid for 15 minutes). Anam uses it immediately when the client connects, so there's no issue with expiry in normal usage. If you're pre-fetching tokens, create them just before the client needs them.
@@ -332,9 +332,9 @@ body: JSON.stringify({
 
 See [ElevenLabs custom LLM docs](https://elevenlabs.io/docs/eleven-agents/customization/llm/custom-llm) for how to set up a custom LLM backend.
 
-## Client-side setup
+## Start the avatar session
 
-The client code is the same as any standard Anam integration. You pass `avatarId` and `agentId` when requesting the session token:
+Request the session token, create an Anam client, and attach its stream to your video element:
 
 ```typescript
 import { createClient } from "@anam-ai/js-sdk";
@@ -350,11 +350,11 @@ const client = createClient(sessionToken);
 await client.streamToVideoElement("avatar-video");
 ```
 
-No ElevenLabs SDK, no audio bridging, no microphone management. Anam handles the conversation.
+`streamToVideoElement()` starts microphone capture and renders the avatar's video and audio in the element with the matching ID.
 
 ### Forwarding client tools
 
-Client tools still execute in the browser, but the ElevenLabs connection can remain server-side. Anam forwards the tool call to the JavaScript SDK, runs the registered handler, then sends the returned result back to ElevenLabs.
+ElevenLabs client tools execute in the browser. Anam forwards each tool call to the JavaScript SDK, runs the registered handler, then sends the returned result back to ElevenLabs over the server-side connection.
 
 First, add the tool in the ElevenLabs agent dashboard. Set **Tool Type** to **Client**, enable **Wait for response**, and use the exact name and parameter below. The [ElevenLabs client tools guide](https://elevenlabs.io/docs/eleven-agents/customization/tools/client-tools) shows where to find these settings.
 
@@ -495,7 +495,7 @@ export default function AvatarChat({
 
 For more on event handling, message history, and connection lifecycle, see the [basic Next.js app recipe](/basic-nextjs-app).
 
-## What works and what doesn't
+## Supported features
 
 These ElevenLabs agent features work through the server-side integration: voice intelligence (STT, LLM, TTS), expressive V3 voices, mapped Director Notes cues, interruption handling, custom knowledge bases, server-side tools (webhooks), conversation history, and client tools.
 

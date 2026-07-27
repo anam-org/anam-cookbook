@@ -2,7 +2,7 @@
 
 This Next.js app pairs an ElevenLabs conversational agent with an Anam avatar. ElevenLabs handles speech recognition, LLM reasoning, and text-to-speech. Anam connects to the agent server-side, renders a real-time lip-synced avatar, and maps supported ElevenLabs v3 expressive tags to Director Notes.
 
-> Read the [server-side ElevenLabs agents cookbook](https://anam.ai/cookbook/elevenlabs-server-side-agents) for a walkthrough. If you need direct client-side control over the ElevenLabs connection, see the [`clientside_version`](https://github.com/anam-org/elevenlabs-agent/tree/clientside_version) branch of the original demo.
+> Read the [server-side ElevenLabs agents cookbook](https://anam.ai/cookbook/elevenlabs-server-side-agents) for a walkthrough.
 
 This example was migrated from [anam-org/elevenlabs-agent](https://github.com/anam-org/elevenlabs-agent).
 
