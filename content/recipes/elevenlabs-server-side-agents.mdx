@@ -352,45 +352,6 @@ await client.streamToVideoElement("avatar-video");
 
 `streamToVideoElement()` starts microphone capture and renders the avatar's video and audio in the element with the matching ID.
 
-### Forwarding client tools
-
-ElevenLabs client tools execute in the browser. Anam forwards each tool call to the JavaScript SDK, runs the registered handler, then sends the returned result back to ElevenLabs over the server-side connection.
-
-First, add the tool in the ElevenLabs agent dashboard. Set **Tool Type** to **Client**, enable **Wait for response**, and use the exact name and parameter below. The [ElevenLabs client tools guide](https://elevenlabs.io/docs/eleven-agents/customization/tools/client-tools) shows where to find these settings.
-
-| Tool | Required parameter | Allowed values |
-|---|---|---|
-| `show_notification` | `message` (String) | Any non-empty notification text |
-
-ElevenLabs tool and parameter names are case-sensitive. The description should tell the model to call the tool when the user asks to display a message on screen.
-
-Register the handlers before starting the Anam stream:
-
-```typescript
-const unregisterToolHandlers = [
-  anamClient.registerToolCallHandler("show_notification", {
-    onStart: async ({ arguments: args }) => {
-      if (typeof args.message !== "string" || !args.message.trim()) {
-        throw new Error("message must be a non-empty string");
-      }
-
-      const message = args.message.trim();
-      setNotification(message);
-      return `Displayed the notification: ${message}`;
-    },
-    onFail: async ({ errorMessage }) => {
-      console.error("show_notification failed:", errorMessage);
-    },
-  }),
-];
-
-await anamClient.streamToVideoElement("avatar-video");
-```
-
-Returning a string from `onStart` sends that value back as the tool result. With **Wait for response** enabled, ElevenLabs adds it to the conversation context before the agent continues. Keep the functions in `unregisterToolHandlers` and call them when the session ends or the component unmounts. The [Anam client tools docs](https://anam.ai/docs/personas/tools/client-tools) cover the full handler lifecycle.
-
-The [complete example](https://github.com/anam-org/anam-cookbook/tree/main/examples/elevenlabs-server-side-agent-nextjs) includes argument validation, a notification UI, handler cleanup, and a status panel for checking forwarded calls.
-
 ### Working component example
 
 Below is a React component with connection lifecycle and a streaming transcript.
@@ -494,6 +455,52 @@ export default function AvatarChat({
 ```
 
 For more on event handling, message history, and connection lifecycle, see the [basic Next.js app recipe](/basic-nextjs-app).
+
+## Add a client tool
+
+This example includes an ElevenLabs client tool named `show_notification`. When the agent calls it, Anam forwards the call to the JavaScript SDK in the browser. The handler displays the requested message and returns a result to the ElevenLabs conversation.
+
+### Configure the tool in ElevenLabs
+
+In the ElevenLabs agent dashboard, open **Tools** and add the following tool:
+
+| Setting | Value |
+|---|---|
+| Tool Type | **Client** |
+| Name | `show_notification` |
+| Wait for response | Enabled |
+| Required parameter | `message` (String) |
+
+Tool and parameter names are case-sensitive. Describe the tool as displaying a message on screen when the user asks for one. The [ElevenLabs client tools guide](https://elevenlabs.io/docs/eleven-agents/customization/tools/client-tools) shows where to find these settings.
+
+### Register the handler
+
+Register the handler before starting the Anam stream:
+
+```typescript
+const unregisterToolHandlers = [
+  anamClient.registerToolCallHandler("show_notification", {
+    onStart: async ({ arguments: args }) => {
+      if (typeof args.message !== "string" || !args.message.trim()) {
+        throw new Error("message must be a non-empty string");
+      }
+
+      const message = args.message.trim();
+      setNotification(message);
+      return `Displayed the notification: ${message}`;
+    },
+    onFail: async ({ errorMessage }) => {
+      console.error("show_notification failed:", errorMessage);
+    },
+  }),
+];
+
+await anamClient.streamToVideoElement("avatar-video");
+```
+
+Returning a string from `onStart` sends that value back as the tool result. With **Wait for response** enabled, ElevenLabs adds it to the conversation context before the agent continues. Keep the functions in `unregisterToolHandlers` and call them when the session ends or the component unmounts. The [Anam client tools docs](https://anam.ai/docs/personas/tools/client-tools) cover the full handler lifecycle.
+
+The [complete example](https://github.com/anam-org/anam-cookbook/tree/main/examples/elevenlabs-server-side-agent-nextjs) includes argument validation, a notification UI, handler cleanup, and a status panel for checking tool calls.
 
 ## Supported features
 

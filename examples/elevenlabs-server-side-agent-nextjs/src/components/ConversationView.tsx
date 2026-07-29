@@ -10,7 +10,6 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { AnamEvent, createClient, type AnamClient } from "@anam-ai/js-sdk";
-import type { Persona } from "@/app/page";
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
@@ -49,9 +48,13 @@ function readRequiredString(
 }
 
 export default function ConversationView({
-  persona,
+  personaName,
+  avatarId,
+  agentId,
 }: {
-  persona: Persona;
+  personaName: string;
+  avatarId: string;
+  agentId: string;
 }) {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +64,7 @@ export default function ConversationView({
   const [directorNoteActivity, setDirectorNoteActivity] =
     useState<DirectorNoteActivity | null>(null);
 
-  const isConfigured = Boolean(persona.avatarId && persona.agentId);
+  const isConfigured = Boolean(avatarId && agentId);
 
   const anamClientRef = useRef<AnamClient | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -113,8 +116,6 @@ export default function ConversationView({
     setDirectorNoteActivity(null);
 
     try {
-      const { avatarId, agentId } = persona;
-
       const res = await fetch("/api/anam-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -257,8 +258,9 @@ export default function ConversationView({
   }, [
     clearNotificationTimer,
     clearToolHandlers,
+    avatarId,
+    agentId,
     isConfigured,
-    persona,
   ]);
 
   const stop = useCallback(async () => {
@@ -343,7 +345,7 @@ export default function ConversationView({
             {status === "idle" && (
               <div className="absolute inset-0 flex items-center justify-center bg-black">
                 <span className="mb-16 text-sm font-medium text-white/70 sm:text-base">
-                  {persona.label}
+                  {personaName}
                 </span>
               </div>
             )}
