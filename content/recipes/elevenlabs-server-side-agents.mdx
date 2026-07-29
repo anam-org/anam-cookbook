@@ -10,11 +10,11 @@ authors: [robbie-anam]
 
 ## Overview
 
-Anam's server-side ElevenLabs integration connects Anam directly to an ElevenLabs Conversational AI agent. Instead of bridging audio between two SDKs in the browser, you pass a signed URL when creating an Anam session token and Anam handles the rest.
+Anam's server-side ElevenLabs integration connects an Anam avatar to an ElevenLabs Conversational AI agent. Your server fetches a short-lived ElevenLabs signed URL and includes it when creating an Anam session token.
 
-Your client code gets simpler (no audio bridging, no microphone management, no muting the ElevenLabs speaker). Latency drops because audio flows server-to-server instead of through the browser. And you get session recordings and transcripts in Anam Lab, which the client-side approach can't provide.
+The browser uses the Anam JavaScript SDK to start the WebRTC session and render the avatar. Anam sends conversation audio to ElevenLabs, receives the generated speech, and keeps the avatar in sync. API keys stay on the server, and completed sessions include recordings and transcripts in Anam Lab.
 
-The full source code is available on [GitHub](https://github.com/robbie-anam/elevenlabs-agent/tree/feat/serverside).
+The complete example code is available at [examples/elevenlabs-server-side-agent-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/elevenlabs-server-side-agent-nextjs).
 
 ## Best practices for configuring ElevenLabs agents
 
@@ -22,7 +22,7 @@ All of this configuration happens in the [ElevenLabs agent dashboard](https://el
 
 **LLM choice.** Pick a model with low latency and fast throughput — for example we found Qwen3-30B-A3B to be great for low latency. Reasoning models are not recommended unless you're using a high-throughput provider like Groq. If slower LLM responses are a problem, set a soft timeout in the Advanced tab (e.g. 2 seconds) and configure it to either use a fixed filler phrase or generate one with a faster LLM while the main response generates.
 
-**Voices.** For maximum expressivity, use a V3 voice with Expressive mode enabled. Add audio tags to the system prompt for things like laughter, which works well with some avatars. If latency is your highest concern, it's worth trying Flash or other models that are less expressive but faster.
+**Voices.** For maximum expressivity, use V3 Conversational with Expressive mode enabled. Anam maps supported v3 tags such as `[laughs]`, `[whispers]`, and `[gasps]` to Director Notes, so they affect the avatar's performance as well as the voice. If latency is your highest concern, it's worth trying Flash or another model that is less expressive but faster.
 
 **Background noise.** If background noise is being picked up, turn on the Filter Background Speech toggle in the Advanced menu. It's unclear whether this has an effect on latency.
 
@@ -32,12 +32,13 @@ All of this configuration happens in the [ElevenLabs agent dashboard](https://el
 
 ## How it works
 
-The ElevenLabs connection moves out of the browser and into Anam:
+The session is split between your Next.js server, the browser, and Anam's engine:
 
 ```
 Server:
   1. Fetch signed URL from ElevenLabs API
-  2. Create Anam session token with elevenLabsAgentSettings
+  2. Create Anam session token with Cara 4 Director Notes
+     and elevenLabsAgentSettings
 
 Client:
   3. createClient(sessionToken)
@@ -46,15 +47,18 @@ Client:
 Engine (automatic):
   5. Connects to ElevenLabs agent via signed URL
   6. User speech → ElevenLabs STT → LLM → TTS → Anam face rendering
-  7. Avatar video delivered over WebRTC
+  7. Supported v3 tags → Director Notes cues
+  8. Avatar video delivered over WebRTC
+  9. Client tool calls and results forwarded over the same connection
 ```
 
-Your client code looks the same as a standard Anam turnkey integration. All the ElevenLabs-specific logic is in the session token creation on the server.
+The Next.js route supplies the ElevenLabs settings when it creates the session token. The browser receives that token and uses the Anam JavaScript SDK to start the avatar stream.
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 20.9+
 - An [Anam](https://anam.ai) account and API key (sign up free at [lab.anam.ai](https://lab.anam.ai))
+- A Cara 4 avatar from the Anam Lab Avatars page
 - An [ElevenLabs](https://elevenlabs.io) account with a Conversational AI agent configured via the dashboard
 
 ## Server-side setup
@@ -135,7 +139,14 @@ export async function POST(request: Request) {
       Authorization: `Bearer ${anamApiKey}`,
     },
     body: JSON.stringify({
-      personaConfig: { avatarId },
+      personaConfig: {
+        avatarId,
+        avatarModel: "cara-4",
+        directorNotes: {
+          presetStyle: "warm",
+          expressivity: 0.5,
+        },
+      },
       environment: {
         elevenLabsAgentSettings: {
           signedUrl,
@@ -158,11 +169,64 @@ export async function POST(request: Request) {
 }
 ```
 
-The only difference from a standard Anam session token is the `environment.elevenLabsAgentSettings` field. This tells Anam to connect to the ElevenLabs agent instead of running Anam's built-in STT/LLM/TTS pipeline.
+The `environment.elevenLabsAgentSettings` field configures ElevenLabs as the session's speech recognition, language model, and text-to-speech provider. `avatarModel` and `directorNotes` enable a warm Cara 4 performance at the start of the session.
 
 <Info>
 The signed URL is short-lived (typically valid for 15 minutes). Anam uses it immediately when the client connects, so there's no issue with expiry in normal usage. If you're pre-fetching tokens, create them just before the client needs them.
 </Info>
+
+## Director Notes with ElevenLabs v3
+
+Director Notes give the avatar a baseline performance style and temporary expression cues. The server route above starts with the `warm` preset at `0.5` expressivity. Expressivity accepts values from `0` to `1`; higher values strengthen both the active style and speech-driven motion.
+
+<Warning>
+Director Notes are in beta and only work with Cara 4 avatars. Use a Cara 4 avatar ID and set `avatarModel` to `"cara-4"`, as shown in the server route above.
+</Warning>
+
+Select **V3 Conversational** in the ElevenLabs Agent Voice settings. Expressive mode is enabled automatically for that model. Then add a short rule to the agent's system prompt:
+
+```text
+Use ElevenLabs v3 expressive tags sparingly when the delivery should change.
+For testing, use tags such as [excited], [laughs], [whispers], [sighs],
+[gasps], [angrily], [sarcastic], or [nervous].
+Place each tag immediately before the words it should affect.
+Do not explain or read the tags aloud.
+```
+
+The [ElevenLabs Expressive mode guide](https://elevenlabs.io/docs/eleven-agents/customization/voice/expressive-mode) explains how v3 tags affect the voice. For this integration, Anam recognizes the following provider tags and maps each group to one Director Note cue:
+
+| Director Note cue | Recognized ElevenLabs v3 tags |
+|---|---|
+| `happy` | `[excited]`, `[happily]`, `[cheerfully]`, `[elated]` |
+| `laughter` | `[laugh]`, `[laughs]`, `[laughing]`, `[laughs harder]`, `[starts laughing]`, `[chuckles]`, `[chuckling]`, `[giggles]`, `[giggling]` |
+| `warm` | `[whispers]`, `[whispering]`, `[quietly]` |
+| `playful` | `[sarcastic]`, `[playfully]` |
+| `curious` | `[curiously]`, `[quizzical]`, `[quizzically]` |
+| `concerned` | `[sigh]`, `[sighs]`, `[exhales]` |
+| `sad` | `[sadly]`, `[sorrowful]`, `[tearful]`, `[crying]` |
+| `surprised` | `[gasp]`, `[gasps]`, `[startled]` |
+| `angry` | `[angrily]`, `[furious]`, `[intensely]` |
+| `distressed` | `[nervous]`, `[fearful]`, `[scared]` |
+
+This table is the complete alias list that Anam recognizes. ElevenLabs supports other audio tags, but Anam does not map them to Director Notes. A recognized tag is removed from the transcript before it reaches the browser. An unknown bracketed tag remains ordinary transcript text.
+
+The example listens for `DIRECTOR_NOTE_CUE_APPLIED` so you can see whether the engine recognized and applied a tag:
+
+```typescript
+const [directorNoteActivity, setDirectorNoteActivity] = useState<{
+  cueTag: string;
+  correlationId: string;
+} | null>(null);
+
+anamClient.addListener(AnamEvent.DIRECTOR_NOTE_CUE_APPLIED, (evt) => {
+  setDirectorNoteActivity({
+    cueTag: evt.cueTag,
+    correlationId: evt.correlationId,
+  });
+});
+```
+
+The event contains the normalized Anam cue. For example, ElevenLabs `[laughs]` produces a `laughter` cue, while `[whispers]` produces `warm`. The [Anam Director Notes guide](https://anam.ai/docs/personas/director-notes) covers baseline styles, expressivity, cue events, and Cara 4 requirements.
 
 ## Per-session customisation
 
@@ -268,9 +332,9 @@ body: JSON.stringify({
 
 See [ElevenLabs custom LLM docs](https://elevenlabs.io/docs/eleven-agents/customization/llm/custom-llm) for how to set up a custom LLM backend.
 
-## Client-side setup
+## Start the avatar session
 
-The client code is the same as any standard Anam integration. You pass `avatarId` and `agentId` when requesting the session token:
+Request the session token, create an Anam client, and attach its stream to your video element:
 
 ```typescript
 import { createClient } from "@anam-ai/js-sdk";
@@ -286,7 +350,7 @@ const client = createClient(sessionToken);
 await client.streamToVideoElement("avatar-video");
 ```
 
-No ElevenLabs SDK, no audio bridging, no microphone management. Anam handles the conversation.
+`streamToVideoElement()` starts microphone capture and renders the avatar's video and audio in the element with the matching ID.
 
 ### Working component example
 
@@ -392,11 +456,57 @@ export default function AvatarChat({
 
 For more on event handling, message history, and connection lifecycle, see the [basic Next.js app recipe](/cookbook/basic-nextjs-app).
 
-## What works and what doesn't
+## Add a client tool
 
-These ElevenLabs agent features all work through the server-side integration: voice intelligence (STT, LLM, TTS), expressive V3 voices, interruption handling, custom knowledge bases, server-side tools (webhooks), and conversation history.
+This example includes an ElevenLabs client tool named `show_notification`. When the agent calls it, Anam forwards the call to the JavaScript SDK in the browser. The handler displays the requested message and returns a result to the ElevenLabs conversation.
 
-Client tools (tools that execute in the browser) are not yet supported. If your agent relies on client tools, use the [client-side integration](/cookbook/elevenlabs-expressive-voice-agents) instead.
+### Configure the tool in ElevenLabs
+
+In the ElevenLabs agent dashboard, open **Tools** and add the following tool:
+
+| Setting | Value |
+|---|---|
+| Tool Type | **Client** |
+| Name | `show_notification` |
+| Wait for response | Enabled |
+| Required parameter | `message` (String) |
+
+Tool and parameter names are case-sensitive. Describe the tool as displaying a message on screen when the user asks for one. The [ElevenLabs client tools guide](https://elevenlabs.io/docs/eleven-agents/customization/tools/client-tools) shows where to find these settings.
+
+### Register the handler
+
+Register the handler before starting the Anam stream:
+
+```typescript
+const unregisterToolHandlers = [
+  anamClient.registerToolCallHandler("show_notification", {
+    onStart: async ({ arguments: args }) => {
+      if (typeof args.message !== "string" || !args.message.trim()) {
+        throw new Error("message must be a non-empty string");
+      }
+
+      const message = args.message.trim();
+      setNotification(message);
+      return `Displayed the notification: ${message}`;
+    },
+    onFail: async ({ errorMessage }) => {
+      console.error("show_notification failed:", errorMessage);
+    },
+  }),
+];
+
+await anamClient.streamToVideoElement("avatar-video");
+```
+
+Returning a string from `onStart` sends that value back as the tool result. With **Wait for response** enabled, ElevenLabs adds it to the conversation context before the agent continues. Keep the functions in `unregisterToolHandlers` and call them when the session ends or the component unmounts. The [Anam client tools docs](https://anam.ai/docs/personas/tools/client-tools) cover the full handler lifecycle.
+
+The [complete example](https://github.com/anam-org/anam-cookbook/tree/main/examples/elevenlabs-server-side-agent-nextjs) includes argument validation, a notification UI, handler cleanup, and a status panel for checking tool calls.
+
+## Supported features
+
+These ElevenLabs agent features work through the server-side integration: voice intelligence (STT, LLM, TTS), expressive V3 voices, mapped Director Notes cues, interruption handling, custom knowledge bases, server-side tools (webhooks), conversation history, and client tools.
+
+The ElevenLabs connection and API keys remain server-side when client tools are enabled. Only the specific handler code runs in the browser.
 
 ## Troubleshooting
 
@@ -408,6 +518,17 @@ Client tools (tools that execute in the browser) are not yet supported. If your 
 **Avatar connects but no conversation starts**
 - The signed URL may have expired. Create the session token right before the client needs it, not minutes in advance
 - Verify the ElevenLabs agent is active and not paused in the dashboard
+
+**Director Notes status stays "waiting"**
+- Confirm the avatar is a Cara 4 avatar and `avatarModel` is set to `cara-4`
+- Select V3 Conversational in ElevenLabs and prompt the agent to emit one of the recognized tags listed above
+- Check the response transcript in ElevenLabs to confirm the LLM produced the tag
+- Confirm the Anam engine build includes the ElevenLabs Director Notes aliases
+
+**Client tool status stays "ready"**
+- Confirm the tool type is **Client** in ElevenLabs
+- Match the registered tool and parameter names exactly; they are case-sensitive
+- Enable **Wait for response** if the agent needs to receive the handler's returned string
 
 **"Anam API error: 400" when creating the session token**
 - Check that `avatarId` is valid. Find available avatars at [lab.anam.ai/avatars](https://lab.anam.ai/avatars)
