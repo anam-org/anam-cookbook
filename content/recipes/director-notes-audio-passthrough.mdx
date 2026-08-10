@@ -8,7 +8,7 @@ date: 2026-07-11
 authors: [sr-anam]
 ---
 
-In [audio passthrough](/python-audio-passthrough-tts) mode Anam runs face generation only — it never sees the persona's text, so it can't infer facial expression on its own, and there's no text to carry [Director Notes **inline cue tags**](https://docs.anam.ai/personas/director-notes) like `[warm]` or `[surprised]`. Instead, you send those same cues as `director_note_cue` messages over the WebRTC data channel to steer the avatar's face during a turn.
+In [audio passthrough](/cookbook/python-audio-passthrough-tts) mode Anam runs face generation only — it never sees the persona's text, so it can't infer facial expression on its own, and there's no text to carry [Director Notes **inline cue tags**](https://docs.anam.ai/personas/director-notes) like `[warm]` or `[surprised]`. Instead, you send those same cues as `director_note_cue` messages over the WebRTC data channel to steer the avatar's face during a turn.
 
 This recipe combines three things into one Python script:
 
