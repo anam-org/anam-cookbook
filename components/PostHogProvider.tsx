@@ -8,6 +8,10 @@ import {
   CONSENT_CHANGE_EVENT,
   readConsent,
 } from '@/lib/analytics/consent';
+import {
+  enforcePostHogConsent,
+  safeAnalyticsUrl,
+} from '@/lib/analytics/posthog-consent';
 
 const posthogKey = process.env.NEXT_PUBLIC_POSTHOG_KEY;
 
@@ -16,23 +20,29 @@ export function PostHogProvider({ children }: { children: ReactNode }) {
     function applyConsent(consent: AnalyticsConsent | null) {
       if (!posthogKey) return;
 
-      if (consent?.analytics && !posthog.__loaded) {
+      if (!posthog.__loaded) {
         posthog.init(posthogKey, {
           api_host: '/ingest',
           ui_host: 'https://us.posthog.com',
           person_profiles: 'identified_only',
           capture_pageview: false,
+          cookieless_mode: 'on_reject',
+          before_send: enforcePostHogConsent,
         });
-      } else if (consent?.analytics) {
+      }
+
+      if (!consent) return;
+
+      if (consent.analytics) {
         posthog.opt_in_capturing();
-      } else if (posthog.__loaded) {
-        posthog.reset();
+      } else {
+        posthog.stopSessionRecording();
         posthog.opt_out_capturing();
       }
 
-      if (consent?.analytics) {
-        posthog.capture('$pageview', { $current_url: window.location.href });
-      }
+      posthog.capture('$pageview', {
+        $current_url: safeAnalyticsUrl(window.location.href),
+      });
     }
 
     function handleConsent(event: Event) {

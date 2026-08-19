@@ -56,7 +56,8 @@ export function CookieConsent() {
       <h2 className="text-lg font-semibold">Your privacy choices</h2>
       <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-neutral-300">
         We use optional analytics to understand site usage and advertising
-        cookies to measure campaigns.{' '}
+        cookies to measure campaigns. If you reject analytics cookies, PostHog
+        uses reduced cookieless audience measurement.{' '}
         <Link className="underline" href="https://anam.ai/privacy-policy">
           Privacy policy
         </Link>

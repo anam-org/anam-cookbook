@@ -32,6 +32,13 @@ export function readConsent(): AnalyticsConsent | null {
 }
 
 function clearCookies(prefixes: string[]) {
+  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+    const key = localStorage.key(index);
+    if (key && prefixes.some((prefix) => key.startsWith(prefix))) {
+      localStorage.removeItem(key);
+    }
+  }
+
   document.cookie.split(';').forEach((cookie) => {
     const name = cookie.split('=')[0].trim();
     if (!prefixes.some((prefix) => name.startsWith(prefix))) return;
