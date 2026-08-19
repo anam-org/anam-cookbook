@@ -28,6 +28,14 @@ function readStoredAttribution(): Record<string, string> {
 
 export function Attribution() {
   useEffect(() => {
+    function removeCampaignParams() {
+      document.querySelectorAll<HTMLAnchorElement>('a[href*="lab.anam.ai"]').forEach((link) => {
+        const url = new URL(link.href);
+        ATTRIBUTION_PARAMS.forEach((key) => url.searchParams.delete(key));
+        link.href = url.toString();
+      });
+    }
+
     function persistAndDecorate() {
       if (!readConsent()?.advertising) return;
 
@@ -57,10 +65,17 @@ export function Attribution() {
       });
     }
 
-    persistAndDecorate();
-    window.addEventListener(CONSENT_CHANGE_EVENT, persistAndDecorate);
-    return () =>
-      window.removeEventListener(CONSENT_CHANGE_EVENT, persistAndDecorate);
+    function handleConsent() {
+      if (readConsent()?.advertising) {
+        persistAndDecorate();
+      } else {
+        removeCampaignParams();
+      }
+    }
+
+    handleConsent();
+    window.addEventListener(CONSENT_CHANGE_EVENT, handleConsent);
+    return () => window.removeEventListener(CONSENT_CHANGE_EVENT, handleConsent);
   }, []);
 
   return null;

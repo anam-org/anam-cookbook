@@ -31,18 +31,7 @@ export function readConsent(): AnalyticsConsent | null {
   };
 }
 
-function clearOptionalCookies() {
-  const prefixes = [
-    '_ga',
-    '_gid',
-    '_gat',
-    '_gcl_',
-    'ph_',
-    '_fbp',
-    '_fbc',
-    'anam_attribution',
-  ];
-
+function clearCookies(prefixes: string[]) {
   document.cookie.split(';').forEach((cookie) => {
     const name = cookie.split('=')[0].trim();
     if (!prefixes.some((prefix) => name.startsWith(prefix))) return;
@@ -53,7 +42,6 @@ function clearOptionalCookies() {
 }
 
 export function saveConsent(consent: AnalyticsConsent) {
-  const previous = readConsent();
   const value = `v1.${consent.analytics ? '1' : '0'}.${consent.advertising ? '1' : '0'}`;
 
   document.cookie = `${CONSENT_COOKIE_NAME}=${encodeURIComponent(value)}; path=/; domain=.anam.ai; max-age=${COOKIE_MAX_AGE}; SameSite=Lax; Secure`;
@@ -65,12 +53,11 @@ export function saveConsent(consent: AnalyticsConsent) {
     ad_personalization: consent.advertising ? 'granted' : 'denied',
   });
 
-  if (
-    previous &&
-    ((previous.analytics && !consent.analytics) ||
-      (previous.advertising && !consent.advertising))
-  ) {
-    clearOptionalCookies();
+  if (!consent.analytics) {
+    clearCookies(['_ga', '_gid', '_gat', 'ph_']);
+  }
+  if (!consent.advertising) {
+    clearCookies(['_gcl_', '_fbp', '_fbc', 'anam_attribution']);
   }
 
   window.dispatchEvent(
