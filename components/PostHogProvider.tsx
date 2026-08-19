@@ -8,15 +8,14 @@ import {
   CONSENT_CHANGE_EVENT,
   readConsent,
 } from '@/lib/analytics/consent';
-import {
-  enforcePostHogConsent,
-  safeAnalyticsUrl,
-} from '@/lib/analytics/posthog-consent';
+import { enforcePostHogConsent } from '@/lib/analytics/posthog-consent';
 
 const posthogKey = process.env.NEXT_PUBLIC_POSTHOG_KEY;
 
 export function PostHogProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
+    let capturedInitialPageView = false;
+
     function applyConsent(consent: AnalyticsConsent | null) {
       if (!posthogKey) return;
 
@@ -35,15 +34,18 @@ export function PostHogProvider({ children }: { children: ReactNode }) {
       }
 
       if (consent?.analytics) {
-        posthog.opt_in_capturing();
+        posthog.opt_in_capturing({ captureEventName: false });
       } else {
         posthog.stopSessionRecording();
-        posthog.opt_out_capturing();
+        // The shared cookie is authoritative. Keep PostHog in its default
+        // storage-free cookieless state without writing a second opt-out flag.
+        posthog.clear_opt_in_out_capturing();
       }
 
-      posthog.capture('$pageview', {
-        $current_url: safeAnalyticsUrl(window.location.href),
-      });
+      if (!capturedInitialPageView) {
+        capturedInitialPageView = true;
+        posthog.capture('$pageview', { $current_url: window.location.href });
+      }
     }
 
     function handleConsent(event: Event) {

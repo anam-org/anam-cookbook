@@ -116,7 +116,7 @@ export function CookieConsent() {
         ) : null}
         <button
           type="button"
-          className="flex-1 rounded-lg bg-orange-600 px-3 py-2 text-sm text-white"
+          className="flex-1 rounded-lg bg-orange-700 px-3 py-2 text-sm text-white"
           onClick={() => apply({ analytics: true, advertising: true })}
         >
           Accept all

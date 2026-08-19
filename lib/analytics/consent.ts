@@ -22,7 +22,12 @@ export function readConsent(): AnalyticsConsent | null {
   );
   if (!match) return null;
 
-  const parts = decodeURIComponent(match[1]).split('.');
+  let parts: string[];
+  try {
+    parts = decodeURIComponent(match[1]).split('.');
+  } catch {
+    return null;
+  }
   if (
     parts[0] !== 'v1' ||
     parts.length !== 3 ||
@@ -39,11 +44,15 @@ export function readConsent(): AnalyticsConsent | null {
 }
 
 function clearCookies(prefixes: string[]) {
-  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-    const key = localStorage.key(index);
-    if (key && prefixes.some((prefix) => key.startsWith(prefix))) {
-      localStorage.removeItem(key);
+  try {
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key && prefixes.some((prefix) => key.startsWith(prefix))) {
+        localStorage.removeItem(key);
+      }
     }
+  } catch {
+    // Storage may be unavailable in privacy-restricted browser contexts.
   }
 
   document.cookie.split(';').forEach((cookie) => {
@@ -68,7 +77,7 @@ export function saveConsent(consent: AnalyticsConsent) {
   });
 
   if (!consent.analytics) {
-    clearCookies(['_ga', '_gid', '_gat', 'ph_']);
+    clearCookies(['_ga', '_gid', '_gat', 'ph_', '__ph_opt_in_out_']);
   }
   if (!consent.advertising) {
     clearCookies(['_gcl_', '_fbp', '_fbc', 'anam_attribution']);

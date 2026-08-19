@@ -35,8 +35,6 @@ const nextConfig = {
       },
     ];
   },
-  // PostHog capture endpoints use trailing slashes and must not be redirected.
-  skipTrailingSlashRedirect: true,
   pageExtensions: ['js', 'jsx', 'ts', 'tsx', 'md', 'mdx'],
   images: {
     remotePatterns: [

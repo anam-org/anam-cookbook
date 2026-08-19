@@ -21,6 +21,7 @@ export function safeAnalyticsUrl(value: string): string {
     if (CAMPAIGN_PARAMS.has(key)) safeParams.append(key, parameterValue);
   });
   url.search = safeParams.toString();
+  url.hash = '';
   return url.toString();
 }
 

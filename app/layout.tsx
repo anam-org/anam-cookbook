@@ -76,7 +76,6 @@ export default function RootLayout({
               ad_personalization: 'denied',
               wait_for_update: 500
             });
-            window.gtag('set', 'url_passthrough', true);
             try {
               var match = document.cookie.match(/(?:^|; )anam_cookie_consent=([^;]*)/);
               if (match) {
@@ -145,8 +144,8 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} min-h-screen flex flex-col`}>
         <PostHogProvider>
-          <Attribution />
           <Suspense fallback={null}>
+            <Attribution />
             <PostHogPageView />
           </Suspense>
           <ThemeProvider defaultTheme="dark">

@@ -1,5 +1,6 @@
 'use client';
 
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect } from 'react';
 import {
   CONSENT_CHANGE_EVENT,
@@ -27,17 +28,45 @@ function readStoredAttribution(): Record<string, string> {
 }
 
 export function Attribution() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   useEffect(() => {
-    function removeCampaignParams() {
-      document.querySelectorAll<HTMLAnchorElement>('a[href*="lab.anam.ai"]').forEach((link) => {
-        const url = new URL(link.href);
-        ATTRIBUTION_PARAMS.forEach((key) => url.searchParams.delete(key));
-        link.href = url.toString();
-      });
+    function isLabLink(link: HTMLAnchorElement) {
+      try {
+        return new URL(link.href).origin === 'https://lab.anam.ai';
+      } catch {
+        return false;
+      }
     }
 
-    function persistAndDecorate() {
-      if (!readConsent()?.advertising) return;
+    function updateLinks(
+      root: ParentNode,
+      attribution: Record<string, string> | null,
+    ) {
+      function updateLink(link: HTMLAnchorElement) {
+        if (!isLabLink(link)) return;
+
+        const url = new URL(link.href);
+        ATTRIBUTION_PARAMS.forEach((key) => url.searchParams.delete(key));
+        if (attribution) {
+          Object.entries(attribution).forEach(([key, value]) => {
+            url.searchParams.set(key, value);
+          });
+        }
+        link.href = url.toString();
+      }
+
+      if (root instanceof HTMLAnchorElement) updateLink(root);
+      root.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(updateLink);
+    }
+
+    function removeCampaignParams() {
+      updateLinks(document, null);
+    }
+
+    function captureAttribution() {
+      if (!readConsent()?.advertising) return {};
 
       const current = new URLSearchParams(window.location.search);
       const freshAttribution = Object.fromEntries(
@@ -49,20 +78,15 @@ export function Attribution() {
 
       if (Object.keys(freshAttribution).length > 0) {
         document.cookie = `anam_attribution=${encodeURIComponent(JSON.stringify(freshAttribution))}; path=/; domain=.anam.ai; max-age=${60 * 60 * 24 * 30}; SameSite=Lax; Secure`;
+        return freshAttribution;
       }
 
-      const attribution =
-        Object.keys(freshAttribution).length > 0
-          ? freshAttribution
-          : readStoredAttribution();
+      return readStoredAttribution();
+    }
 
-      document.querySelectorAll<HTMLAnchorElement>('a[href*="lab.anam.ai"]').forEach((link) => {
-        const url = new URL(link.href);
-        Object.entries(attribution).forEach(([key, value]) => {
-          if (!url.searchParams.has(key)) url.searchParams.set(key, value);
-        });
-        link.href = url.toString();
-      });
+    function persistAndDecorate() {
+      const attribution = captureAttribution();
+      updateLinks(document, attribution);
     }
 
     function handleConsent() {
@@ -73,10 +97,26 @@ export function Attribution() {
       }
     }
 
+    const observer = new MutationObserver((mutations) => {
+      const attribution = readConsent()?.advertising
+        ? readStoredAttribution()
+        : null;
+
+      for (const mutation of mutations) {
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof Element) updateLinks(node, attribution);
+        });
+      }
+    });
+
     handleConsent();
+    observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener(CONSENT_CHANGE_EVENT, handleConsent);
-    return () => window.removeEventListener(CONSENT_CHANGE_EVENT, handleConsent);
-  }, []);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener(CONSENT_CHANGE_EVENT, handleConsent);
+    };
+  }, [pathname, searchParams]);
 
   return null;
 }
