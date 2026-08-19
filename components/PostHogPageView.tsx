@@ -3,7 +3,6 @@
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect } from 'react';
 import posthog from 'posthog-js';
-import { readConsent } from '@/lib/analytics/consent';
 import { safeAnalyticsUrl } from '@/lib/analytics/posthog-consent';
 
 export function PostHogPageView() {
@@ -11,7 +10,7 @@ export function PostHogPageView() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    if (pathname && readConsent() && posthog.__loaded) {
+    if (pathname && posthog.__loaded) {
       let url = window.origin + pathname;
       const params = searchParams?.toString();
       if (params) {

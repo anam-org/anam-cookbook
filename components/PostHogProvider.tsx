@@ -22,20 +22,21 @@ export function PostHogProvider({ children }: { children: ReactNode }) {
 
       if (!posthog.__loaded) {
         posthog.init(posthogKey, {
-          api_host: '/ingest',
+          api_host: '/cookbook/ingest',
           ui_host: 'https://us.posthog.com',
           person_profiles: 'identified_only',
           capture_pageview: false,
           cookieless_mode: 'on_reject',
+          // An unanswered banner starts in the same storage-free reduced mode
+          // as rejection. Acceptance upgrades PostHog to normal persistence.
+          opt_out_capturing_by_default: true,
           before_send: enforcePostHogConsent,
         });
       }
 
-      if (!consent) return;
-
-      if (consent.analytics) {
+      if (consent?.analytics) {
         posthog.opt_in_capturing();
-      } else {
+      } else if (consent) {
         posthog.stopSessionRecording();
         posthog.opt_out_capturing();
       }

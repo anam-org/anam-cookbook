@@ -25,8 +25,7 @@ export function safeAnalyticsUrl(value: string): string {
 
 export const enforcePostHogConsent: BeforeSendFn = (event) => {
   const consent = readConsent();
-  if (!consent) return null;
-  if (consent.analytics) return event;
+  if (consent?.analytics) return event;
   if (!event || !['$pageview', '$pageleave'].includes(event.event)) return null;
 
   return {
