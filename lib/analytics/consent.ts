@@ -23,7 +23,14 @@ export function readConsent(): AnalyticsConsent | null {
   if (!match) return null;
 
   const parts = decodeURIComponent(match[1]).split('.');
-  if (parts[0] !== 'v1' || parts.length !== 3) return null;
+  if (
+    parts[0] !== 'v1' ||
+    parts.length !== 3 ||
+    !/^[01]$/.test(parts[1]) ||
+    !/^[01]$/.test(parts[2])
+  ) {
+    return null;
+  }
 
   return {
     analytics: parts[1] === '1',

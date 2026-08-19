@@ -36,7 +36,7 @@ export function PostHogProvider({ children }: { children: ReactNode }) {
 
       if (consent?.analytics) {
         posthog.opt_in_capturing();
-      } else if (consent) {
+      } else {
         posthog.stopSessionRecording();
         posthog.opt_out_capturing();
       }

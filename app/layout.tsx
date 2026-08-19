@@ -81,7 +81,7 @@ export default function RootLayout({
               var match = document.cookie.match(/(?:^|; )anam_cookie_consent=([^;]*)/);
               if (match) {
                 var parts = decodeURIComponent(match[1]).split('.');
-                if (parts[0] === 'v1' && parts.length === 3) {
+                if (parts[0] === 'v1' && parts.length === 3 && /^[01]$/.test(parts[1]) && /^[01]$/.test(parts[2])) {
                   window.gtag('consent', 'update', {
                     analytics_storage: parts[1] === '1' ? 'granted' : 'denied',
                     ad_storage: parts[2] === '1' ? 'granted' : 'denied',

@@ -12,6 +12,7 @@ const CAMPAIGN_PARAMS = new Set([
   'gbraid',
   'wbraid',
 ]);
+const COOKIELESS_DISTINCT_ID = '$posthog_cookieless';
 
 export function safeAnalyticsUrl(value: string): string {
   const url = new URL(value, window.location.origin);
@@ -29,9 +30,15 @@ export const enforcePostHogConsent: BeforeSendFn = (event) => {
   if (!event || !['$pageview', '$pageleave'].includes(event.event)) return null;
 
   return {
-    ...event,
+    uuid: event.uuid,
+    event: event.event,
+    ...(event.timestamp ? { timestamp: event.timestamp } : {}),
     properties: {
-      ...event.properties,
+      token: event.properties?.token,
+      distinct_id: COOKIELESS_DISTINCT_ID,
+      $device_id: null,
+      $cookieless_mode: true,
+      $process_person_profile: false,
       $current_url:
         typeof event.properties?.$current_url === 'string'
           ? safeAnalyticsUrl(event.properties.$current_url)
