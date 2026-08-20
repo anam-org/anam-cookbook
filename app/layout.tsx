@@ -76,6 +76,7 @@ export default function RootLayout({
               ad_personalization: 'denied',
               wait_for_update: 500
             });
+            window.gtag('set', 'ads_data_redaction', true);
             try {
               var match = document.cookie.match(/(?:^|; )anam_cookie_consent=([^;]*)/);
               if (match) {
