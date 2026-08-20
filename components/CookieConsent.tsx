@@ -59,7 +59,7 @@ export function CookieConsent() {
         </button>
         <button
           type="button"
-          className="h-8 rounded-lg border border-[#ff6200] bg-[#ff6200] px-4 text-sm font-normal text-white hover:border-[#e55800] hover:bg-[#e55800] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff6200] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-950"
+          className="h-8 rounded-lg border border-[#ff6200] bg-[#ff6200] px-4 text-sm font-normal text-slate-900 hover:border-[#e55800] hover:bg-[#e55800] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff6200] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-950"
           onClick={() => apply({ analytics: true, advertising: true })}
         >
           Accept
