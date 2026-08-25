@@ -2,11 +2,8 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { Inter } from 'next/font/google';
 import Link from 'next/link';
-import Script from 'next/script';
 import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
-import { PostHogProvider } from '@/components/PostHogProvider';
-import { PostHogPageView } from '@/components/PostHogPageView';
 import { Header } from '@/components/Header';
 import { Attribution } from '@/components/Attribution';
 import { CookieConsent } from '@/components/CookieConsent';
@@ -65,43 +62,6 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
-        <Script id="anam-consent-default" strategy="beforeInteractive">
-          {`
-            window.dataLayer = window.dataLayer || [];
-            window.gtag = window.gtag || function() { window.dataLayer.push(arguments); };
-            window.gtag('consent', 'default', {
-              analytics_storage: 'denied',
-              ad_storage: 'denied',
-              ad_user_data: 'denied',
-              ad_personalization: 'denied',
-              wait_for_update: 500
-            });
-            window.gtag('set', 'ads_data_redaction', true);
-            try {
-              var match = document.cookie.match(/(?:^|; )anam_cookie_consent=([^;]*)/);
-              if (match) {
-                var parts = decodeURIComponent(match[1]).split('.');
-                if (parts[0] === 'v1' && parts.length === 3 && /^[01]$/.test(parts[1]) && /^[01]$/.test(parts[2])) {
-                  window.gtag('consent', 'update', {
-                    analytics_storage: parts[1] === '1' ? 'granted' : 'denied',
-                    ad_storage: parts[2] === '1' ? 'granted' : 'denied',
-                    ad_user_data: parts[2] === '1' ? 'granted' : 'denied',
-                    ad_personalization: parts[2] === '1' ? 'granted' : 'denied'
-                  });
-                }
-              }
-            } catch (error) {}
-          `}
-        </Script>
-        <Script id="anam-gtm" strategy="afterInteractive">
-          {`
-            (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-            new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-            j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-            'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-            })(window,document,'script','dataLayer','GTM-PLGBR5JN');
-          `}
-        </Script>
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -144,17 +104,14 @@ export default function RootLayout({
         />
       </head>
       <body className={`${inter.className} min-h-screen flex flex-col`}>
-        <PostHogProvider>
-          <Suspense fallback={null}>
-            <Attribution />
-            <PostHogPageView />
-          </Suspense>
-          <ThemeProvider defaultTheme="dark">
-            <Header recipes={recipes} />
-            <main className="flex-1">{children}</main>
-            <Footer />
-          </ThemeProvider>
-        </PostHogProvider>
+        <Suspense fallback={null}>
+          <Attribution />
+        </Suspense>
+        <ThemeProvider defaultTheme="dark">
+          <Header recipes={recipes} />
+          <main className="flex-1">{children}</main>
+          <Footer />
+        </ThemeProvider>
         <CookieConsent />
       </body>
     </html>
