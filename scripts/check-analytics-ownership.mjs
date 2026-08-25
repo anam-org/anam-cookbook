@@ -1,27 +1,33 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(import.meta.dirname, '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const roots = ['app', 'components', 'lib'];
 const sourceFiles = [];
+const sourceExtension = /\.(?:js|jsx|ts|tsx|mjs)$/;
 
 function collect(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) collect(absolute);
-    else if (/\.(?:js|jsx|ts|tsx|mjs)$/.test(entry.name)) sourceFiles.push(absolute);
+    else if (sourceExtension.test(entry.name)) sourceFiles.push(absolute);
   }
 }
 
 for (const directory of roots) collect(path.join(root, directory));
-sourceFiles.push(path.join(root, 'next.config.mjs'));
+for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+  if (entry.isFile() && sourceExtension.test(entry.name)) {
+    sourceFiles.push(path.join(root, entry.name));
+  }
+}
 
 const forbidden = [
   /posthog\s*\.\s*init\s*\(/i,
   /googletagmanager\.com/i,
   /GTM-[A-Z0-9]+/,
   /phc_[A-Za-z0-9_-]+/,
-  /\/cookbook\/ingest/,
+  /\/(?:cookbook\/)?ingest(?:\/|['"`])/i,
 ];
 const violations = [];
 
