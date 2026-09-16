@@ -25,7 +25,11 @@ Code injection is not available on Squarespace's free trial. You'll need at leas
 
 ## Grab your embed code
 
-Head to [Anam Lab](https://lab.anam.ai) and open the persona you want to deploy. Go to the **Widget** tab and copy the embed snippet. It looks like this:
+Open your persona in the [Anam Lab](https://lab.anam.ai) editor, select **Embed**, and choose **Widget**.
+
+Add your website origin under **Allowed Domains**, select **+**, and select **Publish**. Add the origin visitors actually use, including any custom domain. For example, `https://example.com` and `https://www.example.com` need separate entries. See the [domain allowlisting guide](https://anam.ai/docs/embed/widget/installation#domain-allowlisting) for origin formats and matching rules.
+
+Then copy the widget embed snippet. It looks like this:
 
 ```html
 <anam-agent agent-id="your-persona-id"></anam-agent>
@@ -57,7 +61,7 @@ Open your live site URL and you should see the widget on the page.
 
 ## Customizing the widget
 
-The easiest way to customize your widget is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Widget** tab to change the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
+The easiest way to customize your widget is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Embed** tab and choose **Widget** to change the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
 
 You can also override settings per-embed using HTML attributes. For example, if you want a specific page to behave differently from your Lab defaults:
 

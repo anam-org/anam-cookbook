@@ -21,7 +21,11 @@ A WordPress site with an Anam avatar widget that appears on every page. Visitors
 
 ## Grab your embed code
 
-Open [Anam Lab](https://lab.anam.ai), go to your persona, and copy the widget embed snippet from the **Widget** tab:
+Open your persona in the [Anam Lab](https://lab.anam.ai) editor, select **Embed**, and choose **Widget**.
+
+Add your website origin under **Allowed Domains**, select **+**, and select **Publish**. Add the origin visitors actually use, including any custom domain. For example, `https://example.com` and `https://www.example.com` need separate entries. See the [domain allowlisting guide](https://anam.ai/docs/embed/widget/installation#domain-allowlisting) for origin formats and matching rules.
+
+Then copy the widget embed snippet. It looks like this:
 
 ```html
 <anam-agent agent-id="your-persona-id"></anam-agent>
@@ -75,7 +79,7 @@ The widget will appear on every page across your site.
 
 ## Customizing the widget
 
-The easiest way to customize your widget is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Widget** tab to change the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
+The easiest way to customize your widget is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Embed** tab and choose **Widget** to change the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
 
 If you need to override something for a specific page, you can also use HTML attributes directly. Go back to **Code Snippets**, find your "Anam widget" snippet, and edit it:
 

@@ -21,7 +21,11 @@ A Shopify store with an Anam avatar widget. Your customers can click it to start
 
 ## Grab your embed code
 
-Open [Anam Lab](https://lab.anam.ai), go to your persona, and copy the widget embed snippet from the **Widget** tab:
+Open your persona in the [Anam Lab](https://lab.anam.ai) editor, select **Embed**, and choose **Widget**.
+
+Add your website origin under **Allowed Domains**, select **+**, and select **Publish**. Add the origin visitors actually use, including any custom domain. For example, `https://example.com` and `https://www.example.com` need separate entries. See the [domain allowlisting guide](https://anam.ai/docs/embed/widget/installation#domain-allowlisting) for origin formats and matching rules.
+
+Then copy the widget embed snippet. It looks like this:
 
 ```html
 <anam-agent agent-id="your-persona-id"></anam-agent>
@@ -66,7 +70,7 @@ Navigate to your live storefront. The widget should appear on the page, position
 
 ## Customizing the widget
 
-The easiest way to customize the widget's appearance and behavior is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Widget** tab and you can change the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
+The easiest way to customize the widget's appearance and behavior is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Embed** tab, choose **Widget**, and you can change the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
 
 You can also override settings per-embed using HTML attributes directly. For example, if you want a specific Shopify page to use different settings than what's configured in Lab:
 
