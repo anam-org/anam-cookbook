@@ -21,7 +21,11 @@ A Wix site with an Anam avatar widget. Visitors can click it to start a conversa
 
 ## Grab your embed code
 
-Go to [Anam Lab](https://lab.anam.ai), open your persona, and copy the widget embed snippet from the **Widget** tab:
+Open your persona in the [Anam Lab](https://lab.anam.ai) editor, select **Embed**, and choose **Widget**.
+
+Add your website origin under **Allowed Domains**, select **+**, and select **Publish**. Add the origin visitors actually use, including any custom domain. For example, `https://example.com` and `https://www.example.com` need separate entries. Origins must match the scheme, hostname, and port; add each origin separately.
+
+Then copy the widget embed snippet. It looks like this:
 
 ```html
 <anam-agent agent-id="your-persona-id"></anam-agent>
@@ -56,7 +60,7 @@ Open your published Wix site. The widget should appear on the page, positioned h
 
 ## Customizing the widget
 
-The easiest way to customize your widget is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Widget** tab to adjust the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
+The easiest way to customize your widget is through the [Anam Lab](https://lab.anam.ai) interface. Open your persona's **Embed** tab and choose **Widget** to adjust the layout, position, initial state, call-to-action text, and more. You don't need to re-copy the embed code after making changes. Just hit **Publish** in the Anam Lab and your live widget will update automatically.
 
 If you need to override something for a specific embed, you can also use HTML attributes directly. Go back to **Settings → Custom Code**, find your Anam Widget snippet, and edit it:
 
