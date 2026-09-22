@@ -7,13 +7,6 @@ export const CONSENT_COOKIE_NAME = 'anam_cookie_consent';
 export const CONSENT_CHANGE_EVENT = 'anam:consent-change';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 180;
 
-declare global {
-  interface Window {
-    dataLayer: unknown[];
-    gtag: (...args: unknown[]) => void;
-  }
-}
-
 export function readConsent(): AnalyticsConsent | null {
   if (typeof document === 'undefined') return null;
 
@@ -68,13 +61,6 @@ export function saveConsent(consent: AnalyticsConsent) {
   const value = `v1.${consent.analytics ? '1' : '0'}.${consent.advertising ? '1' : '0'}`;
 
   document.cookie = `${CONSENT_COOKIE_NAME}=${encodeURIComponent(value)}; path=/; domain=.anam.ai; max-age=${COOKIE_MAX_AGE}; SameSite=Lax; Secure`;
-
-  window.gtag?.('consent', 'update', {
-    analytics_storage: consent.analytics ? 'granted' : 'denied',
-    ad_storage: consent.advertising ? 'granted' : 'denied',
-    ad_user_data: consent.advertising ? 'granted' : 'denied',
-    ad_personalization: consent.advertising ? 'granted' : 'denied',
-  });
 
   if (!consent.analytics) {
     clearCookies(['_ga', '_gid', '_gat', 'ph_', '__ph_opt_in_out_']);
