@@ -14,126 +14,57 @@ const DENIED: AnalyticsConsent = {
 };
 
 export function CookieConsent() {
-  const [saved, setSaved] = useState<AnalyticsConsent | null>(null);
-  const [choices, setChoices] = useState(DENIED);
-  const [open, setOpen] = useState(false);
-  const [showPreferences, setShowPreferences] = useState(false);
+  const [open, setOpen] = useState<boolean | null>(null);
 
   useEffect(() => {
     const current = readConsent();
-    setSaved(current);
-    setChoices(current ?? DENIED);
     setOpen(!current);
   }, []);
 
   function apply(consent: AnalyticsConsent) {
     saveConsent(consent);
-    setSaved(consent);
-    setChoices(consent);
-    setShowPreferences(false);
     setOpen(false);
   }
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className="fixed bottom-4 right-4 z-50 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-lg dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
-        onClick={() => {
-          setChoices(saved ?? DENIED);
-          setShowPreferences(true);
-          setOpen(true);
-        }}
-      >
-        Cookie settings
-      </button>
-    );
-  }
+  if (!open) return null;
 
   return (
     <section
       role="dialog"
       aria-label="Cookie preferences"
-      className="fixed bottom-4 right-4 z-50 w-[min(32rem,calc(100vw-2rem))] rounded-xl border border-slate-300 bg-white p-5 text-slate-900 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
+      aria-live="polite"
+      aria-atomic="true"
+      className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-4 text-slate-900 shadow-lg dark:border-neutral-800 dark:bg-neutral-950 dark:text-white"
     >
-      <h2 className="text-lg font-semibold">Cookie preferences</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-neutral-300">
-        We use optional cookies for analytics and advertising. Until you accept,
-        we use reduced cookieless audience measurement.{' '}
-        <Link className="underline" href="https://anam.ai/privacy-policy">
+      <h2 className="text-sm font-semibold">Optional cookies</h2>
+      <p className="mt-1 text-sm leading-5 text-slate-500 dark:text-neutral-400">
+        We use optional cookies for analytics and advertising. If you decline,
+        we’ll only use cookieless measurement.{' '}
+        <Link
+          className="text-slate-900 underline underline-offset-4 dark:text-white"
+          href="https://anam.ai/privacy-policy"
+        >
           Privacy policy
         </Link>
         .
       </p>
 
-      {showPreferences ? (
-        <div className="mt-4 flex gap-5 text-sm">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={choices.analytics}
-              onChange={(event) =>
-                setChoices((current) => ({
-                  ...current,
-                  analytics: event.target.checked,
-                }))
-              }
-            />
-            Analytics
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={choices.advertising}
-              onChange={(event) =>
-                setChoices((current) => ({
-                  ...current,
-                  advertising: event.target.checked,
-                }))
-              }
-            />
-            Advertising
-          </label>
-        </div>
-      ) : null}
-
-      <div className="mt-5 flex gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2">
         <button
           type="button"
-          className="flex-1 rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+          className="h-8 rounded-lg border border-slate-300 bg-transparent px-4 text-sm font-normal hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff6200] focus-visible:ring-offset-2 dark:border-neutral-700 dark:hover:bg-neutral-900 dark:focus-visible:ring-offset-neutral-950"
           onClick={() => apply(DENIED)}
         >
-          Reject all
+          Decline
         </button>
-        {showPreferences ? (
-          <button
-            type="button"
-            className="flex-1 rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
-            onClick={() => apply(choices)}
-          >
-            Save choices
-          </button>
-        ) : null}
         <button
           type="button"
-          className="flex-1 rounded-lg bg-orange-700 px-3 py-2 text-sm text-white"
+          className="h-8 rounded-lg border border-[#ff6200] bg-[#ff6200] px-4 text-sm font-normal text-slate-900 hover:border-[#e55800] hover:bg-[#e55800] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff6200] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-950"
           onClick={() => apply({ analytics: true, advertising: true })}
         >
-          Accept all
+          Accept
         </button>
       </div>
-
-      {!showPreferences ? (
-        <div className="mt-3 text-center">
-          <button
-            type="button"
-            className="text-sm text-slate-700 underline underline-offset-4 dark:text-neutral-200"
-            onClick={() => setShowPreferences(true)}
-          >
-            Cookie settings
-          </button>
-        </div>
-      ) : null}
     </section>
   );
 }
