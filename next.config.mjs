@@ -17,6 +17,17 @@ const nextConfig = {
         basePath: false,
         permanent: false,
       },
+      // Client-side ElevenLabs recipes were removed in favour of the server-side integration.
+      {
+        source: '/elevenlabs-conversational-agents',
+        destination: '/elevenlabs-server-side-agents',
+        permanent: true,
+      },
+      {
+        source: '/elevenlabs-expressive-voice-agents',
+        destination: '/elevenlabs-server-side-agents',
+        permanent: true,
+      },
     ];
   },
   pageExtensions: ['js', 'jsx', 'ts', 'tsx', 'md', 'mdx'],
