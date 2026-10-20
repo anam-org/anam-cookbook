@@ -15,13 +15,13 @@ This is a demo script to highlight the mechanism — it is not production code.
 - An Anam API key from [lab.anam.ai](https://lab.anam.ai)
 - A Cartesia API key from [cartesia.ai](https://cartesia.ai)
 - **A cara-4 avatar.** Director Notes are ignored on older avatar models — set `ANAM_AVATAR_MODEL=cara-4` and pick a cara-4 avatar in [lab.anam.ai/avatars](https://lab.anam.ai/avatars).
-- **`anam` ≥ 0.7.0a1.** `send_director_note_cue` only exists in the 0.7 alpha line, so this project installs a prerelease.
+- **`anam` ≥ 0.8.0.** The first stable release with `send_director_note_cue`.
 
 ## Setup
 
 ```bash
 cd examples/python-director-notes-audio-passthrough
-uv sync --prerelease=allow
+uv sync
 cp .env.example .env
 # Edit .env: ANAM_API_KEY, CARTESIA_API_KEY (and a cara-4 ANAM_AVATAR_ID)
 ```
@@ -74,4 +74,4 @@ A known tag applies from where it appears until the next known tag. Unknown tags
 | `session.send_director_note_cue(tag, at_seconds=...)` | Steer the face over the data channel |
 | Cartesia `ws.context(..., add_timestamps=True)` / `ctx.push(text)` | Stream TTS with word timings |
 
-**Note:** Audio passthrough and Director Notes are both **Beta** in Anam. On macOS you may see harmless libav duplicate-class warnings (OpenCV + PyAV).
+**Note:** Audio passthrough is **Beta** in Anam. On macOS you may see harmless libav duplicate-class warnings (OpenCV + PyAV).

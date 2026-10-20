@@ -16,7 +16,7 @@ Usage:
     uv run python main.py --text "[warm] Hi. [surprised] Oh! [laughter]"
 
 Requires: ANAM_API_KEY, CARTESIA_API_KEY (see .env.example). Needs a cara-4
-avatar and anam>=0.7.0a1 (Director Notes are only in the 0.7 alpha line).
+avatar and anam>=0.8.0 (the first stable release with Director Notes cues).
 """
 
 import argparse

@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# Anam Director Notes cue tags (steer the avatar's face). Beta.
+# Anam Director Notes cue tags (steer the avatar's face).
 # https://docs.anam.ai/personas/director-notes
 ANAM_CUE_TAGS = {
     "happy", "warm", "playful", "curious", "supportive",

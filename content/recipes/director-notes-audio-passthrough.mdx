@@ -21,7 +21,7 @@ The neat part: **one annotated line drives the whole performance.** You write `[
 The complete code is at [examples/python-director-notes-audio-passthrough](https://github.com/anam-org/anam-cookbook/tree/main/examples/python-director-notes-audio-passthrough).
 
 <Warning>
-Director Notes require a **cara-4 avatar** (`avatar_model="cara-4"`) — older models ignore the cues. `send_director_note_cue` also only exists in **`anam` ≥ 0.7.0a1**, so this example installs a prerelease. Audio passthrough and Director Notes are both **Beta**.
+Director Notes require a **cara-4 avatar** (`avatar_model="cara-4"`) — older models ignore the cues. `send_director_note_cue` needs **`anam` ≥ 0.8.0**. Audio passthrough is **Beta**.
 </Warning>
 
 ## What you'll build
@@ -44,7 +44,7 @@ A Python script that:
 ```bash
 git clone https://github.com/anam-org/anam-cookbook.git
 cd anam-cookbook/examples/python-director-notes-audio-passthrough
-uv sync --prerelease=allow
+uv sync
 cp .env.example .env
 ```
 
