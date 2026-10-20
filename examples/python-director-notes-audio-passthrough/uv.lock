@@ -7,9 +7,6 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
-[options]
-prerelease-mode = "allow"
-
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
@@ -202,7 +199,7 @@ wheels = [
 
 [[package]]
 name = "anam"
-version = "0.7.0a1"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -214,9 +211,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/13/0e/c36945080d7684ba5298641e2459198a881717d60f93549469ed9e6f6930/anam-0.7.0a1.tar.gz", hash = "sha256:1091a5f5481657a0f2e5957d4f3de62451d8d64472e0822a2dd2e0c1ac2145f5", size = 33587, upload-time = "2026-07-08T13:35:05.519Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/be/95d0203ae938f3dd9f174592c9a129dd09182076ae1e62e748df563687ac/anam-0.12.0.tar.gz", hash = "sha256:8d01466e4da2e477763ef36160ee41655868560267236de0ebd3067e77fad53e", size = 46361, upload-time = "2026-10-01T16:34:58.012Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/08/89fa0684a0ba9a67adcf4c17d74fd8be966c3a76a6f5b8232210e2fe2aec/anam-0.7.0a1-py3-none-any.whl", hash = "sha256:5066b257833aeff8367b661fe52a2ecbaea98c769b35b9d5424c015fad5ba7cc", size = 39563, upload-time = "2026-07-08T13:35:04.223Z" },
+    { url = "https://files.pythonhosted.org/packages/83/a5/1647191900b17add19119a9ea8ad2bf0bd7d987ab070ff8962a5411cbdb6/anam-0.12.0-py3-none-any.whl", hash = "sha256:86fac4a60be5cedc309622a8752139faaa00faa0a98339ba28daac7573489238", size = 44810, upload-time = "2026-10-01T16:34:56.493Z" },
 ]
 
 [[package]]
@@ -1444,7 +1441,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anam", specifier = ">=0.7.0a1" },
+    { name = "anam", specifier = ">=0.8.0" },
     { name = "cartesia", specifier = ">=3.3.0" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "opencv-python", specifier = ">=4.9.0" },
