@@ -1,0 +1,9 @@
+[project]
+name = "fishaudio-livekit-avatar"
+version = "0.1.0"
+description = "A Fish Audio voice agent with an Anam avatar in LiveKit"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "livekit-agents[anam,silero]~=1.8",
+    "python-dotenv>=1.0,<2",
+]
