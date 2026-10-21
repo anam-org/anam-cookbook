@@ -19,7 +19,15 @@ Be clear that you are an AI if asked. Do not claim to browse or take actions.
 server = AgentServer()
 
 
-def create_session() -> AgentSession:
+def prewarm(proc: agents.JobProcess) -> None:
+    # Load Silero once per worker process instead of on every connection.
+    proc.userdata["vad"] = silero.VAD.load()
+
+
+server.setup_fnc = prewarm
+
+
+def create_session(vad: silero.VAD) -> AgentSession:
     return AgentSession(
         stt=inference.STT(model="deepgram/nova-3", language="en"),
         llm=inference.LLM(model="openai/gpt-oss-120b"),
@@ -28,7 +36,7 @@ def create_session() -> AgentSession:
             voice="536d3a5e000945adb7038665781a4aca",  # Ethan
             language="en",
         ),
-        vad=silero.VAD.load(),
+        vad=vad,
     )
 
 
@@ -51,7 +59,7 @@ async def fishaudio_avatar(ctx: agents.JobContext):
     avatar = create_avatar()
     await ctx.connect()
     visitor = await ctx.wait_for_participant()
-    session = create_session()
+    session = create_session(ctx.proc.userdata["vad"])
 
     # Attach the avatar output before starting speech.
     await avatar.start(session, room=ctx.room)

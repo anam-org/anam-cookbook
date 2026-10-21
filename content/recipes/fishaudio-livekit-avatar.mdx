@@ -78,16 +78,24 @@ Be clear that you are an AI if asked. Do not claim to browse or take actions.
 """
 
 server = AgentServer()
+
+
+def prewarm(proc: agents.JobProcess) -> None:
+    # Load Silero once per worker process instead of on every connection.
+    proc.userdata["vad"] = silero.VAD.load()
+
+
+server.setup_fnc = prewarm
 ```
 
-Short answers make spoken conversation easier to follow. This agent only receives microphone audio, so its instructions also make clear that it cannot see the visitor or their screen.
+Short answers make spoken conversation easier to follow. This agent only receives microphone audio, so its instructions also make clear that it cannot see the visitor or their screen. `prewarm` loads the Silero voice activity model once per worker process, so each new visitor reuses it instead of waiting for it to load before the avatar starts.
 
 ## Configure Fish Audio through LiveKit Inference
 
 The session factory keeps the speech pipeline in one place:
 
 ```python
-def create_session() -> AgentSession:
+def create_session(vad: silero.VAD) -> AgentSession:
     return AgentSession(
         stt=inference.STT(model="deepgram/nova-3", language="en"),
         llm=inference.LLM(model="openai/gpt-oss-120b"),
@@ -96,11 +104,11 @@ def create_session() -> AgentSession:
             voice="536d3a5e000945adb7038665781a4aca",  # Ethan
             language="en",
         ),
-        vad=silero.VAD.load(),
+        vad=vad,
     )
 ```
 
-Deepgram Nova-3 transcribes incoming speech. GPT-OSS-120B generates a text reply, and Fish Audio Drama 3 speaks it using Ethan. Silero detects speech activity. If you already have a LiveKit agent, keep your existing STT, LLM, tools, and instructions and replace only the TTS configuration you want to change.
+Deepgram Nova-3 transcribes incoming speech. GPT-OSS-120B generates a text reply, and Fish Audio Drama 3 speaks it using Ethan. Silero, loaded by `prewarm`, detects speech activity. If you already have a LiveKit agent, keep your existing STT, LLM, tools, and instructions and replace only the TTS configuration you want to change.
 
 The voice ID and model name come from the shipped demo. Check [LiveKit's Fish Audio model documentation](https://docs.livekit.io/agents/models/tts/fishaudio/) when choosing another voice or model: availability differs between Inference and a direct Fish Audio account.
 
@@ -137,7 +145,7 @@ async def fishaudio_avatar(ctx: agents.JobContext):
     avatar = create_avatar()
     await ctx.connect()
     visitor = await ctx.wait_for_participant()
-    session = create_session()
+    session = create_session(ctx.proc.userdata["vad"])
 
     # Attach the avatar output before starting speech.
     await avatar.start(session, room=ctx.room)
