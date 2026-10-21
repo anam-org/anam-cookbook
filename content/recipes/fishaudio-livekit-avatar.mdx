@@ -1,0 +1,233 @@
+---
+title: Build a Fish Audio voice agent with Anam and LiveKit
+description: "Connect Fish Audio speech to an Anam avatar with Python LiveKit Agents, then talk to it from a browser."
+tags: [livekit, python, fishaudio, tts, agents]
+difficulty: intermediate
+sdk: python
+date: 2026-10-21
+authors: [pranav-anam]
+---
+
+Fish Audio gives your agent a voice. Anam gives it a face, and LiveKit carries the conversation between your agent and the browser. In this cookbook, we'll connect those pieces so you can speak to an avatar and hear it reply using Fish Audio's Ethan voice.
+
+This follows the stack behind the [Fish Audio integration demo](https://anam.ai/integrations/fishaudio): Fish Audio Drama 3 through LiveKit Inference, with Jun rendered by Cara-4.1 Express. The [complete example](https://github.com/anam-org/anam-cookbook/tree/main/examples/fishaudio-livekit-avatar) contains the Python agent, environment template, and dependency lockfile.
+
+## What you'll build
+
+A browser conversation with speech recognition, an LLM, and Fish Audio TTS running through LiveKit Inference. The Anam plugin sends the generated speech to the avatar service and brings synchronized audio and video back into the room. Your frontend subscribes to those tracks.
+
+You can change the voice and avatar independently. The assistant's behavior lives in the LiveKit agent, so adding Anam doesn't require moving your prompts or tools to another orchestration system.
+
+## Prerequisites
+
+- Python 3.11–3.13 and [uv](https://docs.astral.sh/uv/).
+- A [LiveKit Cloud](https://cloud.livekit.io) project with LiveKit Inference enabled and access to the models used below.
+- An Anam API key and an avatar ID from [Anam Lab](https://lab.anam.ai/avatars).
+- Node.js and pnpm for the React frontend.
+
+The main example uses LiveKit credentials for STT, LLM, and TTS. You don't need separate Fish Audio, Deepgram, or OpenAI API keys. Use a dedicated development project so other automatically dispatched workers don't join your test rooms.
+
+## Set up the Python project
+
+Clone the cookbook and install the example's locked dependencies:
+
+```bash
+git clone https://github.com/anam-org/anam-cookbook.git
+cd anam-cookbook/examples/fishaudio-livekit-avatar
+uv sync --locked
+cp .env.example .env.local
+```
+
+For a new project, the equivalent dependencies are `livekit-agents[anam,silero]~=1.8` and `python-dotenv>=1.0,<2`. The Fish Audio plugin isn't required for the Inference path.
+
+Fill in `.env.local`:
+
+```bash
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your_livekit_api_key
+LIVEKIT_API_SECRET=your_livekit_api_secret
+ANAM_API_KEY=your_anam_api_key
+ANAM_AVATAR_ID=cdd5ceb2-3edc-4d2f-a013-82b885784dfd
+```
+
+The supplied avatar ID is Jun. Replace it with an avatar available to your account if needed. Keep the API keys and LiveKit secret on the server; none belongs in a `NEXT_PUBLIC_` variable.
+
+## Define the assistant
+
+Let's walk through `agent.py`. These snippets, in order, make up the complete file in the example.
+
+Start by loading the environment and defining how the assistant should respond:
+
+```python
+"""Fish Audio speech and Anam avatar video in a LiveKit room."""
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from livekit import agents
+from livekit.agents import Agent, AgentServer, AgentSession, inference, room_io
+from livekit.plugins import anam, silero
+
+load_dotenv(Path(__file__).with_name(".env.local"))
+
+INSTRUCTIONS = """You are Jun, a friendly AI assistant in a live voice conversation.
+Keep replies to one to three short sentences. Use plain spoken English without
+Markdown, code, or lists. You can hear the user but cannot see them or their screen.
+Be clear that you are an AI if asked. Do not claim to browse or take actions.
+"""
+
+server = AgentServer()
+
+
+def prewarm(proc: agents.JobProcess) -> None:
+    # Load Silero once per worker process instead of on every connection.
+    proc.userdata["vad"] = silero.VAD.load()
+
+
+server.setup_fnc = prewarm
+```
+
+Short answers make spoken conversation easier to follow. This agent only receives microphone audio, so its instructions also make clear that it cannot see the visitor or their screen. `prewarm` loads the Silero voice activity model once per worker process, so each new visitor reuses it instead of waiting for it to load before the avatar starts.
+
+## Configure Fish Audio through LiveKit Inference
+
+The session factory keeps the speech pipeline in one place:
+
+```python
+def create_session(vad: silero.VAD) -> AgentSession:
+    return AgentSession(
+        stt=inference.STT(model="deepgram/nova-3", language="en"),
+        llm=inference.LLM(model="openai/gpt-oss-120b"),
+        tts=inference.TTS(
+            model="fishaudio/drama-3",
+            voice="536d3a5e000945adb7038665781a4aca",  # Ethan
+            language="en",
+        ),
+        vad=vad,
+    )
+```
+
+Deepgram Nova-3 transcribes incoming speech. GPT-OSS-120B generates a text reply, and Fish Audio Drama 3 speaks it using Ethan. Silero, loaded by `prewarm`, detects speech activity. If you already have a LiveKit agent, keep your existing STT, LLM, tools, and instructions and replace only the TTS configuration you want to change.
+
+The voice ID and model name come from the shipped demo. Check [LiveKit's Fish Audio model documentation](https://docs.livekit.io/agents/models/tts/fishaudio/) when choosing another voice or model: availability differs between Inference and a direct Fish Audio account.
+
+## Attach the Anam avatar
+
+Next, create the visual part of the conversation:
+
+```python
+def create_avatar() -> anam.AvatarSession:
+    return anam.AvatarSession(
+        api_key=os.environ["ANAM_API_KEY"],
+        persona_config=anam.PersonaConfig(
+            name="Jun",
+            avatarId=os.environ["ANAM_AVATAR_ID"],
+            avatarModel="cara-4.1-express",
+            directorNotes=anam.DirectorNotes(presetStyle="warm", expressivity=0.8),
+        ),
+        avatar_participant_identity="anam-fishaudio-avatar",
+    )
+```
+
+`avatarId` selects the face, while `avatarModel` selects the model that renders it. `directorNotes` gives Jun a warm baseline style. It doesn't change the Fish Audio voice.
+
+The shipped demo also uses Fish Audio delivery cues in speech. Those vocal cues and Anam director notes are separate controls: this Inference path does not supply word timings for synchronized, per-phrase expression changes. Start with the baseline above before experimenting with voice cues.
+
+## Start the avatar before the conversation
+
+Now wire the factories into a LiveKit job:
+
+```python
+# No agent_name: use automatic dispatch in a dedicated development project.
+@server.rtc_session()
+async def fishaudio_avatar(ctx: agents.JobContext):
+    avatar = create_avatar()
+    await ctx.connect()
+    visitor = await ctx.wait_for_participant()
+    session = create_session(ctx.proc.userdata["vad"])
+
+    # Attach the avatar output before starting speech.
+    await avatar.start(session, room=ctx.room)
+    await session.start(
+        room=ctx.room,
+        agent=Agent(instructions=INSTRUCTIONS),
+        room_options=room_io.RoomOptions(
+            participant_identity=visitor.identity,
+            close_on_disconnect=True,
+            delete_room_on_close=True,
+        ),
+    )
+    await session.say("Hi, I'm Jun, an AI assistant. What would you like to talk about?")
+
+
+if __name__ == "__main__":
+    agents.cli.run_app(server)
+```
+
+The agent connects and waits for a visitor before starting the avatar. Starting the avatar before `session.start()` attaches the avatar output before the first spoken response. The Anam plugin handles audio forwarding and the avatar's room tracks; you don't need a second browser Anam SDK session or manual PCM conversion.
+
+`participant_identity` binds the conversation to that visitor. This example closes the session and deletes its room when the visitor disconnects, so use it for one visitor per room. The LiveKit session and avatar integration register cleanup with the job context.
+
+The worker has no explicit agent name, so LiveKit can dispatch it automatically. The public demo uses a named worker and explicit dispatch to keep it separate from other agents. If you add an `agent_name` here, configure the frontend to request that same name.
+
+## Run the agent and frontend
+
+Download the local model files, then start the worker:
+
+```bash
+uv run -m livekit.agents download-files
+uv run agent.py dev
+```
+
+Keep that terminal running. In a second terminal, set up the [LiveKit React agent starter](https://github.com/livekit-examples/agent-starter-react):
+
+```bash
+git clone https://github.com/livekit-examples/agent-starter-react.git
+cd agent-starter-react
+pnpm install
+cp .env.example .env.local
+```
+
+Set the frontend's server-side `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to the same development project. Leave `AGENT_NAME` empty to use automatic dispatch, then start it:
+
+```bash
+pnpm dev
+```
+
+Open the local URL and connect with microphone permission. You should hear Jun's greeting once and see the avatar video. Ask a question, interrupt a longer answer, then disconnect and reconnect to check the full session lifecycle.
+
+If you build your own frontend, subscribe to the avatar participant's audio and video. Avoid playing the raw TTS audio separately, which would duplicate the speech. A voice/avatar toggle should hide the video while keeping the same room and audio subscription active, as the public demo does.
+
+## Use a direct Fish Audio account instead
+
+[Fish Audio's LiveKit integration guide](https://docs.fish.audio/developer-guide/integrations/livekit) documents a different route: the Fish Audio plugin talks to Fish's API using `FISH_API_KEY`. Choose it when you need your Fish account's voices or provider-managed billing.
+
+Add the plugin to this Python project:
+
+```bash
+uv add "livekit-agents[fishaudio]~=1.8"
+```
+
+Add `FISH_API_KEY` to the agent's private `.env.local`. Import `fishaudio` alongside the other plugins and replace the `tts=` value in `create_session()` with:
+
+```python
+tts=fishaudio.TTS(
+    model="s2.1-pro",
+    voice_id="your_fish_voice_id",
+    sample_rate=24000,
+    latency_mode="balanced",
+),
+```
+
+Use a voice accessible to that Fish account. The installed Fish Audio plugin (1.8.8) uses `voice_id`; LiveKit Inference uses `voice`. Fish Audio's linked guide shows `reference_id`, so check the signature for your installed plugin rather than mixing versions. Its model name also omits the `fishaudio/` prefix. The STT and LLM in this example still use LiveKit Inference, and the Anam avatar wiring stays the same.
+
+## Troubleshooting the first conversation
+
+- **No agent joins:** confirm the frontend and worker use the same LiveKit project, that the worker is running, and that dispatch matches any agent name you added.
+- **Voice fails:** check Inference access and model availability. For the direct plugin, check `FISH_API_KEY` and the voice ID in your Fish account.
+- **No avatar appears:** check the worker's Anam error, the avatar ID, and whether your frontend renders remote video tracks.
+- **You hear speech twice:** remove any separate raw TTS playback. The avatar output supplies the synchronized speech.
+- **A session survives disconnect:** check that the browser actually leaves the room and that the session is bound to the visitor's identity.
+
+For the broader integration, see [Anam's LiveKit quickstart](https://anam.ai/docs/integrations/livekit/quickstart). That walkthrough uses Node.js and OpenAI Realtime; this recipe uses a Python STT/LLM/TTS pipeline so Fish Audio owns speech generation. Change the assistant's instructions, voice, or face to fit the conversation you want to build.
