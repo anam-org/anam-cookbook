@@ -35,7 +35,7 @@ export const personaConfig = {
   name: "Mia",
   avatarId: "edf6fdcb-acab-44b8-b974-ded72665ee26", // Mia
   voiceId: "6bfbe25a-979d-40f3-a92b-5394170af54b", // Cara
-  llmId: "0934d97d-0c3a-4f33-91b0-5e136a0ef466", // gpt-4.1-mini
+  llmId: "65421f1c-c7de-4bc4-ac27-d171c16ef41f", // Qwen 3.8 27b
   systemPrompt,
   tools: [
     {

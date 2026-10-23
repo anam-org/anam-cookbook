@@ -123,7 +123,7 @@ export const personaConfig = {
   name: "Mia",
   avatarId: "edf6fdcb-acab-44b8-b974-ded72665ee26", // Mia
   voiceId: "6bfbe25a-979d-40f3-a92b-5394170af54b", // Cara
-  llmId: "0934d97d-0c3a-4f33-91b0-5e136a0ef466", // gpt-4.1-mini
+  llmId: "65421f1c-c7de-4bc4-ac27-d171c16ef41f", // Qwen 3.8 27b
   systemPrompt,
   tools: [
     {
@@ -166,7 +166,7 @@ Both tools set `awaitResult: true`. That means the LLM waits for our handler to 
 
 `highlight` takes both a name and a ref. The ref picks out exactly one control, but models sometimes copy the ref from the line next to the one they mean. Asking for the name too lets us check one against the other.
 
-If you find the persona skipping its tools or forgetting the rules in the prompt, try a larger model. In our testing, GPT-4.1 followed tool instructions more reliably than GPT-4.1 mini.
+The persona runs on Qwen 3.8 27b, the default model for new personas in Anam Lab. Anam hosts it and tunes it for fast replies and tool calling, which suits a persona that calls a tool on most turns.
 
 ## Creating the session token
 
