@@ -1,6 +1,11 @@
 import { AnamEvent, MessageRole } from "@anam-ai/js-sdk";
 import type { AnamClient, MessageStreamEvent } from "@anam-ai/js-sdk";
-import { createSightline, describeElement, diffLines } from "@smidge/sightline";
+import {
+  createSightline,
+  describeElement,
+  diffLines,
+  findControl,
+} from "@smidge/sightline";
 import type { PageChange } from "@smidge/sightline";
 
 // A plain page update has to add or remove at least this many outline lines,
@@ -27,9 +32,13 @@ export function giveBrowserVision(
     maxChars: 4000, // about 1,000 tokens per outline
   });
 
+  // The last outline the persona received, from us or from a tool result.
+  let sent = "";
+
   function screen() {
     const outline = sightline.capture();
     if (!outline) return "[screen] The page is empty or still loading.";
+    sent = outline.text;
     return `[screen] The page right now:\n${outline.text}`;
   }
 
@@ -39,31 +48,32 @@ export function giveBrowserVision(
 
   const stopHighlighting = client.registerToolCallHandler("highlight", {
     onStart: async ({ arguments: args }) => {
-      const element = findControl(String(args.name ?? ""), args.ref);
+      // Models sometimes copy the quotes from the outline along with the name.
+      const name = String(args.name ?? "").replace(/["“”]/g, "").trim();
+      const element = controlFor(name, args.ref);
       if (!element) {
         // Send the screen back so the persona can recover without another
         // round trip.
-        return `That control isn't on the screen. It may be on another page or in a closed menu, so don't try it again.\n${screen()}`;
+        return `Not found on the screen. It may be on another page or in a closed menu.\n${screen()}`;
       }
       sightline.highlight(element, { durationMs: RING_MS });
-      return "It's highlighted. Say the step now in one short sentence, unless you already have.";
+      return "Highlighted.";
     },
   });
 
   // A ref only counts if it's in the outline right now, so a control behind
   // an open dialog can't be ringed. Models sometimes pass the ref from the
   // line next to the one they mean, so the name has to match too.
-  function findControl(name: string, ref: unknown) {
+  function controlFor(name: string, ref: unknown) {
     const id = typeof ref === "string" ? ref.match(/e\d+/)?.[0] : undefined;
     const byRef = id ? sightline.capture()?.refs.get(id) : undefined;
     const refName = byRef && describeElement(byRef, { skip: options.skip })?.name;
     if (byRef && refName?.toLowerCase() === name.toLowerCase()) return byRef;
-    return sightline.find(name);
+    return findControl(name, { skip: options.skip });
   }
 
   // Send each change the persona needs to know about, and remember what we
   // sent so small changes add up until they're worth sending.
-  let sent = "";
   function onChange(change: PageChange) {
     const message = describeChange(change, sent);
     if (!message || !client.isStreaming()) return;

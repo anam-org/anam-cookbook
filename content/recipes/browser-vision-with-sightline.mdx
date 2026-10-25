@@ -10,11 +10,11 @@ authors: [smidge]
 
 # Give your avatar browser vision with Sightline
 
-![Acme Cloud's Projects page with a ring around the API keys link in the sidebar and Mia's dock in the corner](/img/browser-vision/ring-on-api-keys.jpg)
+![Acme Cloud's Projects page with a ring around the API keys link in the sidebar](/img/browser-vision/ring-on-api-keys.jpg)
 
 A user on your Projects page asks your avatar, "How do I create an API key?" A persona that only knows your docs can recite the steps. A persona that can see the page knows the user is one click away, draws a ring around "API keys" in the sidebar, and says "Click API keys in the sidebar."
 
-[Sightline](https://github.com/Smidge/sightline) gives the persona that view. It runs in the browser, reads the page the way a screen reader does, and turns it into a short text outline the LLM can read. In this recipe we'll connect it to an Anam persona with one function of under 100 lines, so the persona can see the page, follow the user around the app, and point at the control it's talking about.
+[Sightline](https://github.com/Smidge/sightline) gives the persona that view. It runs in the browser, reads the page the way a screen reader does, and turns it into a short text outline the LLM can read. In this recipe we'll connect it to an Anam persona with one file of about 120 lines, so the persona can see the page, follow the user around the app, and point at the control it's talking about.
 
 The complete example code is available at [examples/browser-vision-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/browser-vision-nextjs). If you'd rather run it first and read after:
 
@@ -39,7 +39,7 @@ Sightline builds the outline in the browser, without screenshots or a browser ex
 
 ## How the persona sees the page
 
-Here's what the persona receives. When the user opens the API keys page, Sightline produces this:
+Here's what the persona receives. When a session starts on the API keys page, Sightline produces this:
 
 ```text
 Page: /api-keys
@@ -88,7 +88,7 @@ The Acme Cloud pages are ordinary React, so rather than walk through them, copy 
 BASE=https://raw.githubusercontent.com/anam-org/anam-cookbook/main/examples/browser-vision-nextjs/src
 for file in app/page.tsx app/api-keys/page.tsx app/settings/page.tsx app/globals.css \
   components/Sidebar.tsx components/Dialog.tsx components/ui.tsx; do
-  curl --create-dirs -o "src/$file" "$BASE/$file"
+  curl -fsSL --create-dirs -o "src/$file" "$BASE/$file"
 done
 ```
 
@@ -117,13 +117,14 @@ You can't see what the user types into a field. If they ask whether you can see 
 - Give one step at a time, then wait for the user to do it.
 - For a step that uses a control, call highlight first, before you say anything. Pass the control's name exactly as the outline shows it, and its ref. It draws a ring around the control and scrolls it into view.
 - Then say the step once, in one short sentence that names the control, like "Click API keys in the sidebar." Don't mention the ring.
+- If highlight can't find the control, pick one from the screen it sends back, or guide the user to the page that has it.
 - If the control is on another page, guide them there with the sidebar first. If a dialog is open, help them finish or close it first.
 - You can't click or type for the user.
 
 ## Acme Cloud
 - Projects: the home page. Create a project with "New project".
 - API keys: create and revoke keys.
-- Settings: workspace name, email notifications and deleting the workspace.
+- Settings: workspace name and email notifications.
 
 ## How you speak
 Your words are spoken aloud. Keep replies to one or two short sentences, with no lists or markdown. Never say refs, paths, tool names or the word "outline".`;
@@ -210,7 +211,12 @@ Let's start with the imports, a Sightline instance and the `look_at_screen` hand
 
 import { AnamEvent, MessageRole } from "@anam-ai/js-sdk";
 import type { AnamClient, MessageStreamEvent } from "@anam-ai/js-sdk";
-import { createSightline, describeElement, diffLines } from "@smidge/sightline";
+import {
+  createSightline,
+  describeElement,
+  diffLines,
+  findControl,
+} from "@smidge/sightline";
 import type { PageChange } from "@smidge/sightline";
 
 // A plain page update has to add or remove at least this many outline lines,
@@ -237,9 +243,13 @@ export function giveBrowserVision(
     maxChars: 4000, // about 1,000 tokens per outline
   });
 
+  // The last outline the persona received, from us or from a tool result.
+  let sent = "";
+
   function screen() {
     const outline = sightline.capture();
     if (!outline) return "[screen] The page is empty or still loading.";
+    sent = outline.text;
     return `[screen] The page right now:\n${outline.text}`;
   }
 
@@ -250,12 +260,12 @@ export function giveBrowserVision(
 
 `createSightline` takes two options here:
 
-- **skip** - a CSS selector for anything the outline should leave out. We'll pass the avatar's own dock, so the persona doesn't describe its own "End call" button. You can add anything private to it too, such as `"[data-avatar-dock], [data-private]"`.
+- **skip** - a CSS selector for anything the outline should leave out. We'll pass the avatar's own dock, so the persona doesn't describe its own "End call" button. You can add private parts of your page too, such as `"[data-avatar-dock], [data-private]"`. Put the attribute on the whole element, like the status message or the table, because a heading or status that contains a skipped span still reads out its full text.
 - **maxChars** - the character budget for one outline. The default is 6,000. We send the outline every time the page changes, so a smaller budget keeps the conversation lean.
 
 Keep one Sightline instance for the whole session. It remembers which element each ref points to, so `e4` still means "Create API key" after the page has changed around it.
 
-`screen()` captures the page and labels it with `[screen]`, the same label the prompt describes, so a tool result reads like any other outline. `capture()` returns `null` on an empty page, so we return a short message instead.
+`screen()` captures the page and labels it with `[screen]`, the same label the prompt describes, so a tool result reads like any other outline. It also records the outline in `sent`, which we'll use later to decide when the page has changed enough to tell the persona. `capture()` returns `null` on an empty page, so we return a short message instead.
 
 `client.registerToolCallHandler` connects a client tool to a function. Whatever string `onStart` returns is sent back to the LLM as the tool result.
 
@@ -266,39 +276,41 @@ Next, the `highlight` handler. This goes inside `giveBrowserVision`, under `stop
 ```typescript
   const stopHighlighting = client.registerToolCallHandler("highlight", {
     onStart: async ({ arguments: args }) => {
-      const element = findControl(String(args.name ?? ""), args.ref);
+      // Models sometimes copy the quotes from the outline along with the name.
+      const name = String(args.name ?? "").replace(/["“”]/g, "").trim();
+      const element = controlFor(name, args.ref);
       if (!element) {
         // Send the screen back so the persona can recover without another
         // round trip.
-        return `That control isn't on the screen. It may be on another page or in a closed menu, so don't try it again.\n${screen()}`;
+        return `Not found on the screen. It may be on another page or in a closed menu.\n${screen()}`;
       }
       sightline.highlight(element, { durationMs: RING_MS });
-      return "It's highlighted. Say the step now in one short sentence, unless you already have.";
+      return "Highlighted.";
     },
   });
 
   // A ref only counts if it's in the outline right now, so a control behind
   // an open dialog can't be ringed. Models sometimes pass the ref from the
   // line next to the one they mean, so the name has to match too.
-  function findControl(name: string, ref: unknown) {
+  function controlFor(name: string, ref: unknown) {
     const id = typeof ref === "string" ? ref.match(/e\d+/)?.[0] : undefined;
     const byRef = id ? sightline.capture()?.refs.get(id) : undefined;
     const refName = byRef && describeElement(byRef, { skip: options.skip })?.name;
     if (byRef && refName?.toLowerCase() === name.toLowerCase()) return byRef;
-    return sightline.find(name);
+    return findControl(name, { skip: options.skip });
   }
 ```
 
-`findControl` trusts a ref only when two things are true:
+`controlFor` trusts a ref only when two things are true:
 
 - **It's on screen now** - `capture().refs` maps each ref in a fresh outline to its element. A ref from an older outline might point at a button behind an open dialog, or on a page Next.js has hidden but kept in memory, and neither of those is in a fresh outline.
 - **Its name matches** - `describeElement` gives us the element's name as the outline shows it. Models sometimes copy the ref from the line next to the one they mean, and the name catches that.
 
-When either check fails, `sightline.find` looks for a visible control with that name instead. Pulling the ref out with `/e\d+/` also copes with a model that sends `[ref=e4]` rather than `e4`.
+When either check fails, Sightline's `findControl` looks for a visible control with that name instead. We use it rather than `sightline.find`, which would treat a name like `e4` as a ref and skip both checks. Pulling the ref out with `/e\d+/` copes with a model that sends `[ref=e4]` rather than `e4`, and we strip quotes from the name for the same reason.
 
 `sightline.highlight` scrolls the element into view and draws a pulsing ring over it. The ring sits on top of the page and ignores the pointer, so it doesn't change your elements or get in the way of a click. It lasts six seconds, long enough for the result to reach the persona and for the persona to start saying the step.
 
-The tool results are written for the LLM. When the control is missing, we send the current screen with the result, so the persona can pick a real control or send the user to another page without making another tool call. When the highlight works, we remind it to say the step once.
+The tool results only report what happened, and the system prompt tells the persona what to do next. When the control is missing, we send the current screen with the result, so the persona can pick a control that's there or send the user to another page without another tool call.
 
 ### Following the user around the app
 
@@ -307,7 +319,6 @@ Now let's keep the persona up to date as the user moves around. This block finis
 ```typescript
   // Send each change the persona needs to know about, and remember what we
   // sent so small changes add up until they're worth sending.
-  let sent = "";
   function onChange(change: PageChange) {
     const message = describeChange(change, sent);
     if (!message || !client.isStreaming()) return;
@@ -342,7 +353,7 @@ Now let's keep the persona up to date as the user moves around. This block finis
 
 Context sent before the session is fully up is dropped, and the first change `watch` reports is the page as it is right now. If we started watching straight away, that first outline could be lost. So we wait for the persona's greeting: the first `MESSAGE_STREAM_EVENT_RECEIVED` event from the persona means the session is ready. The first outline arrives while Mia is still saying hello. If your persona uses `skipGreeting`, watching starts with its first reply instead, and `look_at_screen` covers the first question.
 
-`onChange` sends each message with `client.addContext` and remembers the outline it sent. `addContext` can throw if the connection drops, so we catch that rather than let it break the watcher.
+`onChange` sends each message with `client.addContext` and records the outline in `sent`. `addContext` can throw if the connection drops, so we catch that rather than let it break the watcher.
 
 ### Describing each change
 
@@ -379,9 +390,9 @@ Each change has a `kind`:
 - **navigation** - the address changed
 - **dialog-opened** and **dialog-closed** - a modal dialog appeared or went away
 - **alert** - a toast, alert or status message appeared. Other things often change at the same time, like a row disappearing when you revoke a key, so we send the outline with it.
-- **update** - anything else. `diffLines` compares the new outline with the last one we sent, and we only bother the persona when at least six lines were added or removed. An edited line counts as one of each.
+- **update** - anything else. `diffLines` compares the new outline with the last one the persona received, and we only bother the persona when at least six lines were added or removed. An edited line counts as one of each.
 
-Every message starts with `[screen]`, the label the system prompt told the persona to look for, and a short sentence that says what happened. We leave the address out of that sentence because the outline's `Page:` line already has it, with query parameters stripped except the ones you allow.
+Every message starts with `[screen]`, the label the system prompt told the persona to look for, and a short sentence that says what happened. We leave the address out of that sentence because the outline's `Page:` line already has it, with query parameters stripped except `tab` and any you list in Sightline's `keepParams` option.
 
 ## Creating the session token
 
@@ -599,7 +610,7 @@ Let's check everything so far. Run `pnpm dev` and open [http://localhost:3000](h
 
 ## Hiding the page behind an open dialog
 
-When a modal dialog is open, the user can only use the dialog, so the persona should only see the dialog too. Sightline skips anything marked with the HTML [`inert`](https://developer.mozilla.org/docs/Web/HTML/Global_attributes/inert) attribute or `aria-hidden="true"`. Component libraries like Radix and Headless UI already mark the rest of the page this way when a dialog opens. They also cover the avatar dock, though, so the user can't press "End call" until the dialog closes. If that matters to you, render the dock inside the library's portal container.
+When a modal dialog is open, the user can only use the dialog, so the persona should only see the dialog too. Sightline skips anything marked with the HTML [`inert`](https://developer.mozilla.org/docs/Web/HTML/Global_attributes/inert) attribute or `aria-hidden="true"`. Component libraries like Radix and Headless UI already mark the rest of the page this way when a dialog opens, so with them there's nothing to add. They usually block the avatar dock too, so the user may need to close the dialog before they can press "End call".
 
 The example's own dialog, the `Dialog.tsx` you copied earlier, opens from the "New project" and "Create API key" buttons. It renders into `document.body` with a portal, outside `#app`, and the part that matters is this effect:
 
@@ -647,12 +658,12 @@ Open [http://localhost:3000](http://localhost:3000), click **Talk to Mia** and a
 
 - **"How do I create an API key?"** from the Projects page. She should ring "API keys" in the sidebar. Click it, ask "what's next?", and she should ring "Create API key".
 - **"What does this form need?"** with the New project dialog open. She should describe the fields in the dialog, not the page behind it.
-- **"Where do I turn off email notifications?"** She should send you to Settings and point at the switch.
+- **"Where do I turn off email notifications?"** from the Projects page. She should ring "Settings" in the sidebar. Click it, ask "what's next?", and she should ring the Email notifications switch.
 
 If something doesn't work:
 
 - **"ANAM_API_KEY is not configured"** - `.env.local` must sit in the project root, next to `package.json`. Restart `pnpm dev` after creating it.
-- **"Failed to get session token"** - check the terminal running `pnpm dev`. The line after `Anam API error:` gives the reason, such as an invalid API key.
+- **"Failed to get session token"** - check the terminal running `pnpm dev`. The text after `Anam API error:` gives the reason, such as an invalid API key.
 - **Mia talks but doesn't react when you speak** - the microphone is blocked. Allow it from the address bar, then end the call and start a new one.
 - **Mia doesn't seem to know what's on the page** - add `console.log(message)` at the start of the `try` block in `onChange`. A `[screen]` message should appear in the browser console as Mia says hello, and again each time you change page or open a dialog.
 

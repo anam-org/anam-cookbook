@@ -33,4 +33,4 @@ pnpm dev
 - `src/components/AvatarDock.tsx` starts the session and calls `giveBrowserVision`. It lives in the root layout, so the session survives navigation, and it is marked `data-avatar-dock` so the outline never describes it.
 - `src/components/Dialog.tsx` marks the rest of the app `inert` while it's open, so the persona only sees the dialog.
 
-Sightline only reports what a screen reader would. It never includes what the user typed into a field.
+Sightline only reports what a screen reader would, and it leaves out what the user types into text fields.

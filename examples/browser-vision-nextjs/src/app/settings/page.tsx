@@ -14,7 +14,7 @@ export default function SettingsPage() {
         description="Manage your workspace."
       />
 
-      <section className="mb-8 max-w-lg rounded-xl border border-zinc-200 p-6">
+      <section className="max-w-lg rounded-xl border border-zinc-200 p-6">
         <h2 className="mb-4 font-semibold">General</h2>
         <form
           action={() => setSaved(true)}
@@ -52,16 +52,6 @@ export default function SettingsPage() {
             )}
           </div>
         </form>
-      </section>
-
-      <section className="max-w-lg rounded-xl border border-red-200 p-6">
-        <h2 className="mb-1 font-semibold text-red-700">Danger zone</h2>
-        <p className="mb-4 text-sm text-zinc-500">
-          Deleting the workspace removes every project and key.
-        </p>
-        <button className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50">
-          Delete workspace
-        </button>
       </section>
     </>
   );
