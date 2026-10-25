@@ -1,12 +1,16 @@
 import { AnamEvent, MessageRole } from "@anam-ai/js-sdk";
 import type { AnamClient, MessageStreamEvent } from "@anam-ai/js-sdk";
-import { createSightline, describeElement } from "@smidge/sightline";
+import { createSightline, describeElement, diffLines } from "@smidge/sightline";
 import type { PageChange } from "@smidge/sightline";
 
-// A plain page update has to change at least this many outline lines before
-// we tell the persona about it. Smaller ones (a counter ticking, a field
-// filling in) would only add noise.
+// A plain page update has to add or remove at least this many outline lines,
+// compared with the last outline we sent, before we tell the persona about it.
+// Smaller ones (a switch flipping, a field filling in) would only add noise.
 const MIN_CHANGED_LINES = 6;
+
+// Long enough for the tool result to reach the persona and for it to start
+// saying the step.
+const RING_MS = 6000;
 
 /**
  * Lets the persona see the page. Sightline turns the page into a text
@@ -20,34 +24,55 @@ export function giveBrowserVision(
 ) {
   const sightline = createSightline({
     skip: options.skip, // never describe the avatar's own UI
-    viewport: true, // mark controls scrolled out of view
     maxChars: 4000, // about 1,000 tokens per outline
   });
 
+  function screen() {
+    const outline = sightline.capture();
+    if (!outline) return "[screen] The page is empty or still loading.";
+    return `[screen] The page right now:\n${outline.text}`;
+  }
+
   const stopLooking = client.registerToolCallHandler("look_at_screen", {
-    onStart: async () =>
-      sightline.capture()?.text ?? "The page is still loading.",
+    onStart: async () => screen(),
   });
 
   const stopHighlighting = client.registerToolCallHandler("highlight", {
     onStart: async ({ arguments: args }) => {
-      const name = String(args.name ?? "");
-      const element = findControl(name, args.ref);
+      const element = findControl(String(args.name ?? ""), args.ref);
       if (!element) {
-        return `There is no "${name}" on the screen. Call look_at_screen and use a name from it.`;
+        // Send the screen back so the persona can recover without another
+        // round trip.
+        return `That control isn't on the screen. It may be on another page or in a closed menu, so don't try it again.\n${screen()}`;
       }
-      sightline.highlight(element);
-      return `"${name}" is highlighted. Now tell the user the step in one short sentence.`;
+      sightline.highlight(element, { durationMs: RING_MS });
+      return "It's highlighted. Say the step now in one short sentence, unless you already have.";
     },
   });
 
-  // Models sometimes pass the ref from the line next to the one they mean,
-  // so a ref only wins when it points at a control with the same name.
-  function findControl(name: string, ref?: string) {
-    const byRef = ref ? sightline.resolve(ref) : null;
-    const refName = describeElement(byRef, { skip: options.skip })?.name;
+  // A ref only counts if it's in the outline right now, so a control behind
+  // an open dialog can't be ringed. Models sometimes pass the ref from the
+  // line next to the one they mean, so the name has to match too.
+  function findControl(name: string, ref: unknown) {
+    const id = typeof ref === "string" ? ref.match(/e\d+/)?.[0] : undefined;
+    const byRef = id ? sightline.capture()?.refs.get(id) : undefined;
+    const refName = byRef && describeElement(byRef, { skip: options.skip })?.name;
     if (byRef && refName?.toLowerCase() === name.toLowerCase()) return byRef;
     return sightline.find(name);
+  }
+
+  // Send each change the persona needs to know about, and remember what we
+  // sent so small changes add up until they're worth sending.
+  let sent = "";
+  function onChange(change: PageChange) {
+    const message = describeChange(change, sent);
+    if (!message || !client.isStreaming()) return;
+    try {
+      client.addContext(message);
+      sent = change.outline.text;
+    } catch (error) {
+      console.error("Couldn't send the page to the persona", error);
+    }
   }
 
   // Context sent before the persona is ready is dropped. The greeting means
@@ -56,10 +81,7 @@ export function giveBrowserVision(
   const onFirstWords = (event: MessageStreamEvent) => {
     if (event.role !== MessageRole.PERSONA) return;
     client.removeListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onFirstWords);
-    stopWatching = sightline.watch((change) => {
-      const message = describeChange(change);
-      if (message && client.isStreaming()) client.addContext(message);
-    });
+    stopWatching = sightline.watch(onChange);
   };
   client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onFirstWords);
 
@@ -71,22 +93,24 @@ export function giveBrowserVision(
   };
 }
 
-function describeChange(change: PageChange): string | null {
+function describeChange(change: PageChange, sent: string): string | null {
   const outline = change.outline.text;
   switch (change.kind) {
     case "initial":
-      return `[screen] The user has ${change.path} open.\n${outline}`;
+      return `[screen] The page the user has open:\n${outline}`;
     case "navigation":
-      return `[screen] The user moved to ${change.path}.\n${outline}`;
+      return `[screen] The user moved to another page:\n${outline}`;
     case "dialog-opened":
-      return `[screen] A dialog opened.\n${outline}`;
+      return `[screen] A dialog opened:\n${outline}`;
     case "dialog-closed":
       return `[screen] The dialog closed. The page now shows:\n${outline}`;
-    case "alert":
-      return `[screen] New message on screen: ${change.alerts.map((text) => `"${text}"`).join(", ")}`;
+    case "alert": {
+      const texts = change.alerts.map((text) => `"${text}"`).join(", ");
+      return `[screen] New message on screen: ${texts}. The page now shows:\n${outline}`;
+    }
     case "update": {
-      const changed = change.diff.added.length + change.diff.removed.length;
-      if (changed < MIN_CHANGED_LINES) return null;
+      const { added, removed } = diffLines(sent, outline);
+      if (added.length + removed.length < MIN_CHANGED_LINES) return null;
       return `[screen] The page changed. It now shows:\n${outline}`;
     }
   }

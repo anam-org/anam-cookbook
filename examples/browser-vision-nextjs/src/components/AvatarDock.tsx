@@ -27,11 +27,21 @@ export function AvatarDock() {
       const client = createClient(await fetchSessionToken());
       clientRef.current = client;
 
+      // The call that gives the persona eyes on the page. It goes before
+      // streamToVideoElement so the tools are ready before the persona is.
+      const stopVision = giveBrowserVision(client, {
+        skip: "[data-avatar-dock]",
+      });
+      stopVisionRef.current = stopVision;
+
       client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () =>
         setStatus("connected")
       );
       client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
-        stopVisionRef.current?.();
+        stopVision();
+        // Ignore an older call that closes after a new one has started.
+        if (clientRef.current !== client) return;
+        clientRef.current = null;
         if (reason === ConnectionClosedCode.NORMAL) {
           setStatus("idle");
         } else {
@@ -40,13 +50,9 @@ export function AvatarDock() {
         }
       });
 
-      // The one line that gives the persona eyes on the page.
-      stopVisionRef.current = giveBrowserVision(client, {
-        skip: "[data-avatar-dock]",
-      });
-
       await client.streamToVideoElement("avatar-video");
     } catch (err) {
+      stopVisionRef.current?.();
       setError(err instanceof Error ? err.message : "Failed to start session");
       setStatus("error");
     }
