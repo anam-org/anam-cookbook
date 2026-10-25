@@ -6,6 +6,8 @@ The app is a made-up hosting dashboard called Acme Cloud, with Projects, API key
 
 ## Setup
 
+You'll need Node.js 22 or later (24 LTS recommended) and pnpm.
+
 1. Copy `.env.example` to `.env.local` and add your API key:
 
 ```bash
