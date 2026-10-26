@@ -10,9 +10,9 @@ import {
 } from "@/components/ui";
 
 const initialProjects = [
-  { name: "marketing-site", region: "London", status: "Running" },
-  { name: "checkout-api", region: "Frankfurt", status: "Running" },
-  { name: "image-worker", region: "Virginia", status: "Paused" },
+  { id: "marketing-site", name: "marketing-site", region: "London", status: "Running" },
+  { id: "checkout-api", name: "checkout-api", region: "Frankfurt", status: "Running" },
+  { id: "image-worker", name: "image-worker", region: "Virginia", status: "Paused" },
 ];
 
 export default function ProjectsPage() {
@@ -20,9 +20,10 @@ export default function ProjectsPage() {
   const [creating, setCreating] = useState(false);
 
   function createProject(form: FormData) {
-    const name = String(form.get("name") || "untitled");
+    const name = String(form.get("name") ?? "").trim() || "untitled";
     const region = String(form.get("region"));
-    setProjects((current) => [...current, { name, region, status: "Running" }]);
+    const id = crypto.randomUUID();
+    setProjects((current) => [...current, { id, name, region, status: "Running" }]);
     setCreating(false);
   }
 
@@ -38,24 +39,26 @@ export default function ProjectsPage() {
         }
       />
 
-      <table className="w-full overflow-hidden rounded-xl border border-zinc-200 text-left text-sm">
-        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
-          <tr>
-            <th className="px-4 py-3 font-medium">Name</th>
-            <th className="px-4 py-3 font-medium">Region</th>
-            <th className="px-4 py-3 font-medium">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {projects.map((project) => (
-            <tr key={project.name} className="border-t border-zinc-200">
-              <td className="px-4 py-3 font-medium">{project.name}</td>
-              <td className="px-4 py-3 text-zinc-600">{project.region}</td>
-              <td className="px-4 py-3 text-zinc-600">{project.status}</td>
+      <div className="overflow-x-auto">
+        <table className="w-full overflow-hidden rounded-xl border border-zinc-200 text-left text-sm">
+          <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+            <tr>
+              <th className="px-4 py-3 font-medium">Name</th>
+              <th className="px-4 py-3 font-medium">Region</th>
+              <th className="px-4 py-3 font-medium">Status</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {projects.map((project) => (
+              <tr key={project.id} className="border-t border-zinc-200">
+                <td className="px-4 py-3 font-medium">{project.name}</td>
+                <td className="px-4 py-3 text-zinc-600">{project.region}</td>
+                <td className="px-4 py-3 text-zinc-600">{project.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {creating && (
         <Dialog title="New project" onClose={() => setCreating(false)}>

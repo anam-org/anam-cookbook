@@ -17,7 +17,11 @@ export default function SettingsPage() {
       <section className="max-w-lg rounded-xl border border-zinc-200 p-6">
         <h2 className="mb-4 font-semibold">General</h2>
         <form
-          action={() => setSaved(true)}
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSaved(true);
+          }}
+          onChange={() => setSaved(false)}
           className="flex flex-col gap-4"
         >
           <label className="flex flex-col gap-1.5 text-sm font-medium">
@@ -33,11 +37,14 @@ export default function SettingsPage() {
               role="switch"
               aria-checked={emails}
               aria-labelledby="emails-label"
-              onClick={() => setEmails(!emails)}
-              className="relative h-6 w-11 rounded-full bg-zinc-300 transition-colors aria-checked:bg-indigo-600"
+              onClick={() => {
+                setEmails(!emails);
+                setSaved(false);
+              }}
+              className="relative h-6 w-11 rounded-full bg-zinc-300 transition-colors motion-reduce:transition-none aria-checked:bg-indigo-600"
             >
               <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left] ${emails ? "left-5.5" : "left-0.5"}`}
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left] motion-reduce:transition-none ${emails ? "left-5.5" : "left-0.5"}`}
               />
             </button>
           </div>

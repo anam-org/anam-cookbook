@@ -10,8 +10,8 @@ import {
 } from "@/components/ui";
 
 const initialKeys = [
-  { label: "production", access: "Full access", created: "12 Sep 2026" },
-  { label: "analytics", access: "Read only", created: "3 Oct 2026" },
+  { id: "production", label: "production", access: "Full access", created: "12 Sep 2026" },
+  { id: "analytics", label: "analytics", access: "Read only", created: "3 Oct 2026" },
 ];
 
 export default function ApiKeysPage() {
@@ -20,15 +20,16 @@ export default function ApiKeysPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   function createKey(form: FormData) {
-    const label = String(form.get("label") || "untitled");
+    const label = String(form.get("label") ?? "").trim() || "untitled";
     const access = String(form.get("access"));
-    setKeys((current) => [...current, { label, access, created: "Today" }]);
+    const id = crypto.randomUUID();
+    setKeys((current) => [...current, { id, label, access, created: "Today" }]);
     setCreating(false);
     setNotice(`API key "${label}" created.`);
   }
 
-  function revokeKey(label: string) {
-    setKeys((current) => current.filter((key) => key.label !== label));
+  function revokeKey(id: string, label: string) {
+    setKeys((current) => current.filter((key) => key.id !== id));
     setNotice(`API key "${label}" revoked.`);
   }
 
@@ -53,34 +54,36 @@ export default function ApiKeysPage() {
         </p>
       )}
 
-      <table className="w-full overflow-hidden rounded-xl border border-zinc-200 text-left text-sm">
-        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
-          <tr>
-            <th className="px-4 py-3 font-medium">Label</th>
-            <th className="px-4 py-3 font-medium">Access</th>
-            <th className="px-4 py-3 font-medium">Created</th>
-            <th className="px-4 py-3" />
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((key) => (
-            <tr key={key.label} className="border-t border-zinc-200">
-              <td className="px-4 py-3 font-medium">{key.label}</td>
-              <td className="px-4 py-3 text-zinc-600">{key.access}</td>
-              <td className="px-4 py-3 text-zinc-600">{key.created}</td>
-              <td className="px-4 py-3 text-right">
-                <button
-                  className="text-sm font-medium text-red-600 hover:underline"
-                  aria-label={`Revoke ${key.label}`}
-                  onClick={() => revokeKey(key.label)}
-                >
-                  Revoke
-                </button>
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full overflow-hidden rounded-xl border border-zinc-200 text-left text-sm">
+          <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+            <tr>
+              <th className="px-4 py-3 font-medium">Label</th>
+              <th className="px-4 py-3 font-medium">Access</th>
+              <th className="px-4 py-3 font-medium">Created</th>
+              <th className="px-4 py-3" />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {keys.map((key) => (
+              <tr key={key.id} className="border-t border-zinc-200">
+                <td className="px-4 py-3 font-medium">{key.label}</td>
+                <td className="px-4 py-3 text-zinc-600">{key.access}</td>
+                <td className="px-4 py-3 text-zinc-600">{key.created}</td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    className="text-sm font-medium text-red-600 hover:underline"
+                    aria-label={`Revoke ${key.label}`}
+                    onClick={() => revokeKey(key.id, key.label)}
+                  >
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {creating && (
         <Dialog title="Create API key" onClose={() => setCreating(false)}>

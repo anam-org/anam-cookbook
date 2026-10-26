@@ -7,41 +7,59 @@ import { giveBrowserVision } from "@/lib/browser-vision";
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
-async function fetchSessionToken(): Promise<string> {
-  const response = await fetch("/api/session-token", { method: "POST" });
+async function fetchSessionToken(signal: AbortSignal): Promise<string> {
+  const response = await fetch("/api/session-token", { method: "POST", signal });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Failed to get session token");
+  if (typeof data.sessionToken !== "string" || !data.sessionToken) {
+    throw new Error("Failed to get session token");
+  }
   return data.sessionToken;
 }
 
 export function AvatarDock() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
-  const clientRef = useRef<AnamClient | null>(null);
-  const stopVisionRef = useRef<(() => void) | null>(null);
+  const attemptRef = useRef<AbortController | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   async function start() {
+    if (attemptRef.current) return;
+    const attempt = new AbortController();
+    attemptRef.current = attempt;
+    let client: AnamClient | null = null;
+    let stopVision = () => {};
+    let disposed = false;
+    const cleanup = () => {
+      if (disposed) return;
+      disposed = true;
+      attempt.abort();
+      stopVision();
+      void client?.stopStreaming().catch(() => {
+        console.error("Couldn't stop the avatar session");
+      });
+    };
+    cleanupRef.current = cleanup;
     setStatus("connecting");
     setError(null);
     try {
-      const client = createClient(await fetchSessionToken());
-      clientRef.current = client;
+      const token = await fetchSessionToken(attempt.signal);
+      if (attempt.signal.aborted) return;
+      client = createClient(token);
 
-      // The call that gives the persona eyes on the page. It goes before
-      // streamToVideoElement so the tools are ready before the persona is.
-      const stopVision = giveBrowserVision(client, {
+      // Register the tools and greeting listener before streaming starts.
+      stopVision = giveBrowserVision(client, {
         skip: "[data-avatar-dock]",
       });
-      stopVisionRef.current = stopVision;
 
-      client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () =>
-        setStatus("connected")
-      );
+      client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () => {
+        if (attemptRef.current === attempt) setStatus("connected");
+      });
       client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
-        stopVision();
-        // Ignore an older call that closes after a new one has started.
-        if (clientRef.current !== client) return;
-        clientRef.current = null;
+        if (attemptRef.current !== attempt) return;
+        attemptRef.current = null;
+        cleanupRef.current = null;
+        cleanup();
         if (reason === ConnectionClosedCode.NORMAL) {
           setStatus("idle");
         } else {
@@ -52,23 +70,27 @@ export function AvatarDock() {
 
       await client.streamToVideoElement("avatar-video");
     } catch (err) {
-      stopVisionRef.current?.();
+      if (attemptRef.current !== attempt) return;
+      attemptRef.current = null;
+      cleanupRef.current = null;
+      cleanup();
       setError(err instanceof Error ? err.message : "Failed to start session");
       setStatus("error");
     }
   }
 
   function stop() {
-    stopVisionRef.current?.();
-    clientRef.current?.stopStreaming();
-    clientRef.current = null;
+    attemptRef.current = null;
+    cleanupRef.current?.();
+    cleanupRef.current = null;
     setStatus("idle");
   }
 
   useEffect(() => {
     return () => {
-      stopVisionRef.current?.();
-      clientRef.current?.stopStreaming();
+      attemptRef.current = null;
+      cleanupRef.current?.();
+      cleanupRef.current = null;
     };
   }, []);
 
@@ -78,6 +100,12 @@ export function AvatarDock() {
       aria-label="Mia, your guide"
       className="fixed bottom-5 right-5 z-50 w-72 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl"
     >
+      <p role="status" className="sr-only">
+        {status === "connecting" && "Connecting…"}
+        {status === "connected" && "Connected to Mia."}
+        {status === "idle" && "Ready to talk to Mia."}
+        {status === "error" && error}
+      </p>
       <div className="relative aspect-[3/2] bg-zinc-900">
         <video
           id="avatar-video"

@@ -4,6 +4,8 @@ An Anam avatar that can see the page the user is on. [Sightline](https://github.
 
 The app is a made-up hosting dashboard called Acme Cloud, with Projects, API keys and Settings pages. Ask Mia "how do I create an API key?" from any page and she'll guide you there one step at a time.
 
+This is a local demo. The session-token endpoint has no authentication or usage limits. Do not expose it publicly until you add both; anyone who can reach it can create sessions charged to your Anam account.
+
 ## Setup
 
 You'll need Node.js 22 or later (24 LTS recommended) and pnpm.
@@ -36,3 +38,7 @@ pnpm dev
 - `src/components/Dialog.tsx` marks the rest of the app `inert` while it's open, so the persona only sees the dialog.
 
 Sightline only reports what a screen reader would, and it leaves out what the user types into text fields.
+
+## Checks
+
+Run `pnpm test` for regression tests covering highlighting, session-token errors and avatar session cleanup. Run `pnpm lint` and `pnpm build` before changing the example. The tests use a stand-in Anam client; test a live session separately.

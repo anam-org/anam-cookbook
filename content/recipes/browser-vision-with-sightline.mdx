@@ -215,7 +215,6 @@ import {
   createSightline,
   describeElement,
   diffLines,
-  findControl,
 } from "@smidge/sightline";
 import type { PageChange } from "@smidge/sightline";
 
@@ -294,19 +293,29 @@ Next, the `highlight` handler. This goes inside `giveBrowserVision`, under `stop
   // line next to the one they mean, so the name has to match too.
   function controlFor(name: string, ref: unknown) {
     const id = typeof ref === "string" ? ref.match(/e\d+/)?.[0] : undefined;
-    const byRef = id ? sightline.capture()?.refs.get(id) : undefined;
-    const refName = byRef && describeElement(byRef, { skip: options.skip })?.name;
-    if (byRef && refName?.toLowerCase() === name.toLowerCase()) return byRef;
-    return findControl(name, { skip: options.skip });
+    const outline = sightline.capture();
+    if (!outline || !name) return;
+    // Sightline can retain refs for lines removed by its character budget.
+    const refs = new Map([...outline.refs].filter(([ref]) =>
+      outline.text.includes(`[ref=${ref}]`)
+    ));
+    const matches = (element: Element) =>
+      describeElement(element, { skip: options.skip })?.name.toLowerCase() ===
+      name.toLowerCase();
+    const byRef = id ? refs.get(id) : undefined;
+    if (byRef && matches(byRef)) return byRef;
+    // Only fall back when the current outline has one unambiguous match.
+    const candidates = [...refs.values()].filter(matches);
+    if (candidates.length === 1) return candidates[0];
   }
 ```
 
 `controlFor` trusts a ref only when two things are true:
 
-- **It's on screen now** - `capture().refs` maps each ref in a fresh outline to its element. A ref from an older outline might point at a button behind an open dialog, or on a page Next.js has hidden but kept in memory, and neither of those is in a fresh outline.
+- **It's on screen now** - `capture().refs` maps refs to elements. We also check the final outline text because truncation can remove a line without removing its ref from that map. A ref from an older outline might point at a button behind an open dialog, or on a page Next.js has hidden but kept in memory, and neither of those is in a fresh outline.
 - **Its name matches** - `describeElement` gives us the element's name as the outline shows it. Models sometimes copy the ref from the line next to the one they mean, and the name catches that.
 
-When either check fails, Sightline's `findControl` looks for a visible control with that name instead. We use it rather than `sightline.find`, which would treat a name like `e4` as a ref and skip both checks. Pulling the ref out with `/e\d+/` copes with a model that sends `[ref=e4]` rather than `e4`, and we strip quotes from the name for the same reason.
+When either check fails, we look for an exact name match within the fresh outline's refs. We only use that fallback if one element matches. Duplicate names need a matching ref, and controls omitted from the outline cannot be highlighted. A name like `e4` is treated as a name, never as a ref. Pulling the ref out with `/e\d+/` copes with a model that sends `[ref=e4]` rather than `e4`, and we strip quotes from the name for the same reason.
 
 `sightline.highlight` scrolls the element into view and draws a pulsing ring over it. The ring sits on top of the page and ignores the pointer, so it doesn't change your elements or get in the way of a click. It lasts six seconds, long enough for the result to reach the persona and for the persona to start saying the step.
 
@@ -396,6 +405,8 @@ Every message starts with `[screen]`, the label the system prompt told the perso
 
 ## Creating the session token
 
+This endpoint is for a local demo. It has no authentication or usage limits, so anyone who can reach it can create sessions charged to your Anam account. Before deploying it publicly, require an authenticated user and enforce per-user usage limits.
+
 Before the avatar can start a session, it needs a token. The route is the same as in the other cookbook examples: it sends the persona config, including the tools, to Anam and returns a session token to the browser, so your API key never leaves the server.
 
 ```typescript
@@ -414,25 +425,39 @@ export async function POST() {
     );
   }
 
-  const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ personaConfig }),
-  });
+  // Local demo only. Authenticate users and enforce usage limits before
+  // exposing this endpoint publicly; each session uses your Anam account.
+  try {
+    const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ personaConfig }),
+      signal: AbortSignal.timeout(15_000),
+    });
 
-  if (!response.ok) {
-    console.error("Anam API error:", await response.text());
+    if (!response.ok) {
+      console.error("Anam API returned status", response.status);
+      return NextResponse.json(
+        { error: "Failed to get session token" },
+        { status: response.status }
+      );
+    }
+
+    const { sessionToken } = await response.json();
+    if (typeof sessionToken !== "string" || !sessionToken) {
+      throw new Error("Anam API returned no session token");
+    }
+    return NextResponse.json({ sessionToken });
+  } catch {
+    console.error("Anam session token request failed");
     return NextResponse.json(
       { error: "Failed to get session token" },
-      { status: response.status }
+      { status: 500 }
     );
   }
-
-  const { sessionToken } = await response.json();
-  return NextResponse.json({ sessionToken });
 }
 ```
 
@@ -454,45 +479,63 @@ import { giveBrowserVision } from "@/lib/browser-vision";
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
-async function fetchSessionToken(): Promise<string> {
-  const response = await fetch("/api/session-token", { method: "POST" });
+async function fetchSessionToken(signal: AbortSignal): Promise<string> {
+  const response = await fetch("/api/session-token", { method: "POST", signal });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Failed to get session token");
+  if (typeof data.sessionToken !== "string" || !data.sessionToken) {
+    throw new Error("Failed to get session token");
+  }
   return data.sessionToken;
 }
 
 export function AvatarDock() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
-  const clientRef = useRef<AnamClient | null>(null);
-  const stopVisionRef = useRef<(() => void) | null>(null);
+  const attemptRef = useRef<AbortController | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 ```
 
 Next, starting and stopping the session.
 
 ```typescript
   async function start() {
+    if (attemptRef.current) return;
+    const attempt = new AbortController();
+    attemptRef.current = attempt;
+    let client: AnamClient | null = null;
+    let stopVision = () => {};
+    let disposed = false;
+    const cleanup = () => {
+      if (disposed) return;
+      disposed = true;
+      attempt.abort();
+      stopVision();
+      void client?.stopStreaming().catch(() => {
+        console.error("Couldn't stop the avatar session");
+      });
+    };
+    cleanupRef.current = cleanup;
     setStatus("connecting");
     setError(null);
     try {
-      const client = createClient(await fetchSessionToken());
-      clientRef.current = client;
+      const token = await fetchSessionToken(attempt.signal);
+      if (attempt.signal.aborted) return;
+      client = createClient(token);
 
-      // The call that gives the persona eyes on the page. It goes before
-      // streamToVideoElement so the tools are ready before the persona is.
-      const stopVision = giveBrowserVision(client, {
+      // Register the tools and greeting listener before streaming starts.
+      stopVision = giveBrowserVision(client, {
         skip: "[data-avatar-dock]",
       });
-      stopVisionRef.current = stopVision;
 
-      client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () =>
-        setStatus("connected")
-      );
+      client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () => {
+        if (attemptRef.current === attempt) setStatus("connected");
+      });
       client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
-        stopVision();
-        // Ignore an older call that closes after a new one has started.
-        if (clientRef.current !== client) return;
-        clientRef.current = null;
+        if (attemptRef.current !== attempt) return;
+        attemptRef.current = null;
+        cleanupRef.current = null;
+        cleanup();
         if (reason === ConnectionClosedCode.NORMAL) {
           setStatus("idle");
         } else {
@@ -503,28 +546,32 @@ Next, starting and stopping the session.
 
       await client.streamToVideoElement("avatar-video");
     } catch (err) {
-      stopVisionRef.current?.();
+      if (attemptRef.current !== attempt) return;
+      attemptRef.current = null;
+      cleanupRef.current = null;
+      cleanup();
       setError(err instanceof Error ? err.message : "Failed to start session");
       setStatus("error");
     }
   }
 
   function stop() {
-    stopVisionRef.current?.();
-    clientRef.current?.stopStreaming();
-    clientRef.current = null;
+    attemptRef.current = null;
+    cleanupRef.current?.();
+    cleanupRef.current = null;
     setStatus("idle");
   }
 
   useEffect(() => {
     return () => {
-      stopVisionRef.current?.();
-      clientRef.current?.stopStreaming();
+      attemptRef.current = null;
+      cleanupRef.current?.();
+      cleanupRef.current = null;
     };
   }, []);
 ```
 
-We call `giveBrowserVision` before `streamToVideoElement`, so the tool handlers and the greeting listener are in place before the persona can call a tool or say hello. When the connection closes, for whatever reason, we call the cleanup function for that call, so Sightline stops watching a page nobody is talking about. The `clientRef.current !== client` check means a call that closes late can't reset the status of a newer one.
+We call `giveBrowserVision` before `streamToVideoElement`, so the tool handlers and the greeting listener are in place before the persona can call a tool or say hello. When the connection closes, for whatever reason, we call the cleanup function for that call, so Sightline stops watching a page nobody is talking about. Each attempt has its own abort controller and cleanup function. Unmounting cancels a pending token request; a failed start stops its client. Callbacks check the current attempt, so late connection events or errors cannot change a newer call.
 
 Finally, the dock itself. This block closes the component.
 
@@ -535,6 +582,12 @@ Finally, the dock itself. This block closes the component.
       aria-label="Mia, your guide"
       className="fixed bottom-5 right-5 z-50 w-72 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl"
     >
+      <p role="status" className="sr-only">
+        {status === "connecting" && "Connecting…"}
+        {status === "connected" && "Connected to Mia."}
+        {status === "idle" && "Ready to talk to Mia."}
+        {status === "error" && error}
+      </p>
       <div className="relative aspect-[3/2] bg-zinc-900">
         <video
           id="avatar-video"
@@ -594,10 +647,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en">
       <body className="bg-white text-zinc-900 antialiased">
-        {/* Dialogs mark #app inert; the avatar dock stays outside it. */}
-        <div id="app" className="flex min-h-screen">
+        {/* Dialogs mark the app and avatar dock inert while open. */}
+        <div id="app" className="flex min-h-screen flex-col md:flex-row">
           <Sidebar />
-          <main className="min-w-0 flex-1 px-10 py-8">{children}</main>
+          <main className="min-w-0 flex-1 px-4 py-6 pb-80 md:px-10 md:py-8 md:pb-80">{children}</main>
         </div>
         <AvatarDock />
       </body>
@@ -612,22 +665,9 @@ Let's check everything so far. Run `pnpm dev` and open [http://localhost:3000](h
 
 When a modal dialog is open, the user can only use the dialog, so the persona should only see the dialog too. Sightline skips anything marked with the HTML [`inert`](https://developer.mozilla.org/docs/Web/HTML/Global_attributes/inert) attribute or `aria-hidden="true"`. Component libraries like Radix and Headless UI already mark the rest of the page this way when a dialog opens, so with them there's nothing to add. They usually block the avatar dock too, so the user may need to close the dialog before they can press "End call".
 
-The example's own dialog, the `Dialog.tsx` you copied earlier, opens from the "New project" and "Create API key" buttons. It renders into `document.body` with a portal, outside `#app`, and the part that matters is this effect:
+The example's `Dialog.tsx` renders into `document.body` with a portal, outside `#app`. It marks `#app` and the avatar dock inert while open, moves focus to the first dialog control, keeps keyboard focus inside the dialog, and restores focus to the trigger on close. Escape closes it. Its mount effect does not restart when the parent rerenders.
 
-```typescript
-  useEffect(() => {
-    const app = document.getElementById("app");
-    app?.setAttribute("inert", "");
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => {
-      app?.removeAttribute("inert");
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-```
-
-While the dialog is open, `#app` is inert, so the page behind it is hidden from the persona and from the keyboard. The dock sits outside `#app`, so the user can still end the call.
+Close the dialog with Cancel or Escape before using End call in the dock. The dialog sits above the dock and scrolls if its content is taller than the viewport.
 
 When the user clicks "New project", the persona gets this:
 

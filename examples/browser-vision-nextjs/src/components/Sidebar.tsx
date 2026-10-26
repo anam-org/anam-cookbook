@@ -13,12 +13,12 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col gap-6 border-r border-zinc-200 bg-zinc-50 px-3 py-5">
+    <aside className="flex shrink-0 flex-col gap-3 border-b border-zinc-200 bg-zinc-50 px-3 py-4 md:w-56 md:gap-6 md:border-r md:border-b-0 md:py-5">
       <div className="flex items-center gap-2 px-2 font-semibold">
         <span className="h-5 w-5 rounded-md bg-indigo-600" aria-hidden />
         Acme Cloud
       </div>
-      <nav aria-label="Main" className="flex flex-col gap-0.5">
+      <nav aria-label="Main" className="flex flex-wrap gap-0.5 md:flex-col">
         {links.map(({ href, label }) => (
           <Link
             key={href}

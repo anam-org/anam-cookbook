@@ -4,7 +4,6 @@ import {
   createSightline,
   describeElement,
   diffLines,
-  findControl,
 } from "@smidge/sightline";
 import type { PageChange } from "@smidge/sightline";
 
@@ -66,10 +65,20 @@ export function giveBrowserVision(
   // line next to the one they mean, so the name has to match too.
   function controlFor(name: string, ref: unknown) {
     const id = typeof ref === "string" ? ref.match(/e\d+/)?.[0] : undefined;
-    const byRef = id ? sightline.capture()?.refs.get(id) : undefined;
-    const refName = byRef && describeElement(byRef, { skip: options.skip })?.name;
-    if (byRef && refName?.toLowerCase() === name.toLowerCase()) return byRef;
-    return findControl(name, { skip: options.skip });
+    const outline = sightline.capture();
+    if (!outline || !name) return;
+    // Sightline can retain refs for lines removed by its character budget.
+    const refs = new Map([...outline.refs].filter(([ref]) =>
+      outline.text.includes(`[ref=${ref}]`)
+    ));
+    const matches = (element: Element) =>
+      describeElement(element, { skip: options.skip })?.name.toLowerCase() ===
+      name.toLowerCase();
+    const byRef = id ? refs.get(id) : undefined;
+    if (byRef && matches(byRef)) return byRef;
+    // Only fall back when the current outline has one unambiguous match.
+    const candidates = [...refs.values()].filter(matches);
+    if (candidates.length === 1) return candidates[0];
   }
 
   // Send each change the persona needs to know about, and remember what we
