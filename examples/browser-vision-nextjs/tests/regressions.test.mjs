@@ -22,9 +22,9 @@ function load(source, modules, globals = {}) {
 }
 
 function vision() {
-  const a = { name: "Save" }, b = { name: "Cancel" }, omitted = { name: "Hidden" };
+  const a = { name: "Save" }, b = { name: "Cancel" };
   const state = {
-    outline: { text: 'button "Save" [ref=e1]\nbutton "Cancel" [ref=e2]', refs: new Map([["e1", a], ["e2", b], ["e3", omitted]]) },
+    outline: { text: 'button "Save" [ref=e1]\nbutton "Cancel" [ref=e2]', refs: new Map([["e1", a], ["e2", b]]) },
     highlighted: null,
   };
   const handlers = new Map();
@@ -51,7 +51,7 @@ test("highlight uses a current matching ref, and recovers from a wrong ref", asy
   assert.equal(state.highlighted, a);
 });
 
-test("highlight rejects refs retained after truncation and ref-as-name requests", async () => {
+test("highlight rejects controls outside the current outline and ref-as-name requests", async () => {
   const { state, call } = vision();
   for (const args of [{ name: "Hidden" }, { name: "Hidden", ref: "e3" }, { name: "e1" }]) {
     assert.match(await call(args), /^Not found/);
@@ -182,5 +182,60 @@ test("unmount cancels token fetch and never creates a late client", async () => 
   assert.equal(signal.aborted, true);
   request.resolve(tokenResponse());
   await start;
+  assert.equal(app.clients.length, 0);
+});
+
+test("vision waits for the greeting and cleans up watching and tools", () => {
+  const listeners = new Map(), handlers = new Map(), contexts = [];
+  let watchOptions, watchCallback, stopped = false, streaming = true;
+  const { giveBrowserVision } = load("../src/lib/browser-vision.ts", {
+    "@anam-ai/js-sdk": { AnamEvent: { MESSAGE_STREAM_EVENT_RECEIVED: "message" }, MessageRole: { PERSONA: "persona" } },
+    "@smidge/sightline": {
+      createSightline: () => ({
+        watch(callback, options) {
+          watchCallback = callback;
+          watchOptions = options;
+          callback({ outline: { text: "initial page" } });
+          return () => { stopped = true; };
+        },
+      }),
+    },
+  });
+  const cleanup = giveBrowserVision({
+    registerToolCallHandler: (name, handler) => { handlers.set(name, handler); return () => handlers.delete(name); },
+    addListener: (event, callback) => listeners.set(event, callback),
+    removeListener: event => listeners.delete(event),
+    isStreaming: () => streaming,
+    addContext: message => contexts.push(message),
+  });
+  assert.equal(contexts.length, 0);
+  listeners.get("message")({ role: "user" });
+  assert.equal(watchCallback, undefined);
+  listeners.get("message")({ role: "persona" });
+  assert.equal(watchOptions.updates, false);
+  assert.equal(listeners.size, 0);
+  assert.equal(contexts[0], "[screen] initial page");
+  streaming = false;
+  watchCallback({ outline: { text: "later" } });
+  assert.equal(contexts.length, 1);
+  cleanup();
+  assert.equal(stopped, true);
+  assert.equal(handlers.size, 0);
+});
+
+test("highlight matches quoted outline names and rejects unnamed controls", async () => {
+  const { state, a, call } = vision();
+  a.name = 'Open "draft"';
+  assert.equal(await call({ name: "Open 'draft'", ref: "e1" }), "Highlighted.");
+  state.highlighted = null;
+  a.name = "";
+  assert.match(await call({ name: "", ref: "e1" }), /^Not found/);
+  assert.equal(state.highlighted, null);
+});
+
+test("dock gives a useful error for a non-JSON token response", async () => {
+  const app = dock(async () => ({ ok: false, json: async () => { throw new Error("HTML response"); } }));
+  await app.start();
+  assert.ok(app.states.includes("Failed to get session token"));
   assert.equal(app.clients.length, 0);
 });

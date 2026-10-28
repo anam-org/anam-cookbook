@@ -170,8 +170,8 @@ importers:
         specifier: ^4.29.1
         version: 4.29.1
       '@smidge/sightline':
-        specifier: ^0.1.3
-        version: 0.1.3
+        specifier: 0.2.1
+        version: 0.2.1
       next:
         specifier: 16.4.3
         version: 16.4.3(@babel/core@7.29.7(supports-color@7.2.0))(@types/node@24.19.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -621,8 +621,8 @@ packages:
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
 
-  '@smidge/sightline@0.1.3':
-    resolution: {integrity: sha512-JAimRNQhRVoIp1VJau5S+JdnqiKUMYBOnni3v4ExVqs1GOQMO1eHwqzSW3xYx3DSuje9/05j19yT/KxDtl7frA==}
+  '@smidge/sightline@0.2.1':
+    resolution: {integrity: sha512-ZaWWoFAAE0GJBm858UaiK+V4yOeRidbP9MXVnPlTaa6MpFR50TE59EO+IcGcPjFrM29q+xAv9n0QmhKJsxWPuQ==}
     engines: {node: '>=18'}
 
   '@swc/helpers@0.5.23':
@@ -2562,7 +2562,7 @@ snapshots:
 
   '@rtsao/scc@1.1.0': {}
 
-  '@smidge/sightline@0.1.3': {}
+  '@smidge/sightline@0.2.1': {}
 
   '@swc/helpers@0.5.23':
     dependencies:

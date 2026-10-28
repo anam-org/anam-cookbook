@@ -9,7 +9,7 @@ type Status = "idle" | "connecting" | "connected" | "error";
 
 async function fetchSessionToken(signal: AbortSignal): Promise<string> {
   const response = await fetch("/api/session-token", { method: "POST", signal });
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "Failed to get session token");
   if (typeof data.sessionToken !== "string" || !data.sessionToken) {
     throw new Error("Failed to get session token");
@@ -20,23 +20,21 @@ async function fetchSessionToken(signal: AbortSignal): Promise<string> {
 export function AvatarDock() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
-  const attemptRef = useRef<AbortController | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   async function start() {
-    if (attemptRef.current) return;
+    if (cleanupRef.current) return;
+    // Aborting also makes late SDK events from this call harmless.
     const attempt = new AbortController();
-    attemptRef.current = attempt;
     let client: AnamClient | null = null;
     let stopVision = () => {};
-    let disposed = false;
     const cleanup = () => {
-      if (disposed) return;
-      disposed = true;
+      if (attempt.signal.aborted) return;
       attempt.abort();
+      cleanupRef.current = null;
       stopVision();
-      void client?.stopStreaming().catch(() => {
-        console.error("Couldn't stop the avatar session");
+      void client?.stopStreaming().catch((error) => {
+        console.error("Couldn't stop the avatar session", error);
       });
     };
     cleanupRef.current = cleanup;
@@ -47,18 +45,13 @@ export function AvatarDock() {
       if (attempt.signal.aborted) return;
       client = createClient(token);
 
-      // Register the tools and greeting listener before streaming starts.
-      stopVision = giveBrowserVision(client, {
-        skip: "[data-avatar-dock]",
-      });
+      stopVision = giveBrowserVision(client);
 
       client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () => {
-        if (attemptRef.current === attempt) setStatus("connected");
+        if (!attempt.signal.aborted) setStatus("connected");
       });
       client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
-        if (attemptRef.current !== attempt) return;
-        attemptRef.current = null;
-        cleanupRef.current = null;
+        if (attempt.signal.aborted) return;
         cleanup();
         if (reason === ConnectionClosedCode.NORMAL) {
           setStatus("idle");
@@ -70,9 +63,7 @@ export function AvatarDock() {
 
       await client.streamToVideoElement("avatar-video");
     } catch (err) {
-      if (attemptRef.current !== attempt) return;
-      attemptRef.current = null;
-      cleanupRef.current = null;
+      if (attempt.signal.aborted) return;
       cleanup();
       setError(err instanceof Error ? err.message : "Failed to start session");
       setStatus("error");
@@ -80,19 +71,18 @@ export function AvatarDock() {
   }
 
   function stop() {
-    attemptRef.current = null;
     cleanupRef.current?.();
-    cleanupRef.current = null;
     setStatus("idle");
   }
 
-  useEffect(() => {
-    return () => {
-      attemptRef.current = null;
-      cleanupRef.current?.();
-      cleanupRef.current = null;
-    };
-  }, []);
+  useEffect(() => () => cleanupRef.current?.(), []);
+
+  const message = {
+    idle: "Ask Mia how to do anything in Acme Cloud.",
+    connecting: "Connecting…",
+    connected: "Connected to Mia.",
+    error: error ?? "Failed to start session",
+  }[status];
 
   return (
     <aside
@@ -100,12 +90,7 @@ export function AvatarDock() {
       aria-label="Mia, your guide"
       className="fixed bottom-5 right-5 z-50 w-72 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl"
     >
-      <p role="status" className="sr-only">
-        {status === "connecting" && "Connecting…"}
-        {status === "connected" && "Connected to Mia."}
-        {status === "idle" && "Ready to talk to Mia."}
-        {status === "error" && error}
-      </p>
+      <p role="status" className="sr-only">{message}</p>
       <div className="relative aspect-[3/2] bg-zinc-900">
         <video
           id="avatar-video"
@@ -115,9 +100,7 @@ export function AvatarDock() {
         />
         {status !== "connected" && (
           <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-zinc-300">
-            {status === "connecting" && "Connecting…"}
-            {status === "idle" && "Ask Mia how to do anything in Acme Cloud."}
-            {status === "error" && <span className="text-red-300">{error}</span>}
+            {message}
           </div>
         )}
       </div>
