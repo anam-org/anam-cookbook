@@ -23,6 +23,7 @@ function load(source, modules, globals = {}) {
 
 function vision() {
   const a = { name: "Save" }, b = { name: "Cancel" };
+  // Sightline 0.2.1 prunes refs omitted from the final outline, including truncation.
   const state = {
     outline: { text: 'button "Save" [ref=e1]\nbutton "Cancel" [ref=e2]', refs: new Map([["e1", a], ["e2", b]]) },
     highlighted: null,

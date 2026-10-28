@@ -100,7 +100,7 @@ export function AvatarDock() {
         />
         {status !== "connected" && (
           <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-zinc-300">
-            {message}
+            {status === "error" ? <span className="text-red-300">{message}</span> : message}
           </div>
         )}
       </div>

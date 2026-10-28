@@ -1,5 +1,8 @@
 allowBuilds:
   sharp: false
   unrs-resolver: false
+# 0.2.1 fixes refs retained after outline truncation. Published 2026-10-27
+# at 23:22 UTC; pnpm's 24-hour release-age policy blocks it until Oct 28 at 23:22.
+# Keep this exception scoped to the reviewed, pinned version.
 minimumReleaseAgeExclude:
   - '@smidge/sightline@0.2.1'
