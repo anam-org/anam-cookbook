@@ -93,11 +93,18 @@ export default async function RecipePage({ params }: RecipePageProps) {
               </div>
             )}
             <span className="text-sm text-slate-600 dark:text-[rgb(209,213,219)]">
-              {frontmatter.authors?.map((username, i) => (
-                <span key={username}>
-                  {username}{isOrgMember(username) && <span className="text-slate-500 dark:text-neutral-400"> (Anam)</span>}{i < frontmatter.authors.length - 1 && ', '}
-                </span>
-              ))}
+              {frontmatter.authors?.map((username, i) => {
+                const name = frontmatter.authorNames?.[username];
+                const details = [name && `@${username}`, isOrgMember(username) && 'Anam']
+                  .filter(Boolean).join(' · ');
+                return (
+                  <span key={username}>
+                    {name || username}
+                    {details && <span className="text-slate-500 dark:text-neutral-400"> ({details})</span>}
+                    {i < frontmatter.authors.length - 1 && ', '}
+                  </span>
+                );
+              })}
             </span>
           </div>
 

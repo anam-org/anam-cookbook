@@ -12,6 +12,7 @@ export interface RecipeFrontmatter {
   sdk?: 'javascript' | 'python' | 'react' | 'react-native';
   date: string;
   authors: string[]; // GitHub usernames
+  authorNames?: Record<string, string>;
 }
 
 export interface Recipe {
