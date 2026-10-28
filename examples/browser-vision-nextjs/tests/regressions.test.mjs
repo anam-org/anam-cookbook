@@ -23,9 +23,9 @@ function load(source, modules, globals = {}) {
 
 function vision() {
   const a = { name: "Save" }, b = { name: "Cancel" };
-  // Sightline 0.2.1 prunes refs omitted from the final outline, including truncation.
+  // Include a retained ref to verify the helper checks the final outline text.
   const state = {
-    outline: { text: 'button "Save" [ref=e1]\nbutton "Cancel" [ref=e2]', refs: new Map([["e1", a], ["e2", b]]) },
+    outline: { text: 'button "Save" [ref=e1]\nbutton "Cancel" [ref=e2]', refs: new Map([["e1", a], ["e2", b], ["e3", { name: "Hidden" }]]) },
     highlighted: null,
   };
   const handlers = new Map();

@@ -16,7 +16,10 @@ export function giveBrowserVision(client: AnamClient, skip = "[data-avatar-dock]
       const name = String(args.name ?? "").trim().replace(/^["“](.*)["”]$/, "$1");
       const ref = String(args.ref ?? "").match(/e\d+/)?.[0];
       if (!name) return `Not found or ambiguous.\n${screen()}`;
-      const refs = sightline.capture()?.refs ?? new Map<string, Element>();
+      const outline = sightline.capture();
+      const refs = new Map([...(outline?.refs ?? [])].filter(([ref]) =>
+        outline?.text.includes(`[ref=${ref}]`)
+      ));
       const matches = (element: Element) =>
         describeElement(element, { skip })?.name.replace(/"/g, "'").toLowerCase() ===
         name.replace(/"/g, "'").toLowerCase();
