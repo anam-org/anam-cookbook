@@ -8,7 +8,8 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/cookbook';
 export const mdxComponents: MDXComponents = {
   // Override img to handle basePath for local images
   img: ({ src, alt, ...props }: React.ComponentProps<'img'>) => {
-    const resolvedSrc = src && src.startsWith('/') ? `${basePath}${src}` : src;
+    const resolvedSrc =
+      typeof src === 'string' && src.startsWith('/') ? `${basePath}${src}` : src;
     return (
       <img
         src={resolvedSrc}
