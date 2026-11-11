@@ -10,7 +10,7 @@ Important limitation: this simulates conversational continuity, not Anam session
 
 ## Prerequisites
 
-- Node.js 18+ installed
+- Node.js 20.9+ installed
 - An Anam account with API access ([sign up at lab.anam.ai](https://lab.anam.ai))
 
 ## Setup
