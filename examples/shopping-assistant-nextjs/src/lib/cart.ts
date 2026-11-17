@@ -1,15 +1,15 @@
-import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { findVariant, formatPrice } from "@/lib/catalog";
 
 // The cart lives on the server under a random ID kept in a cookie, so the
 // Add to cart button, the cart page and the assistant all read and change the
-// same cart. The carts are in memory, so they're lost when the server
-// restarts. A real store uses its platform's cart instead.
+// same cart. src/proxy.ts sets the ID on the visitor's first request. The
+// carts are in memory, so they're lost when the server restarts. A real store
+// uses its platform's cart instead.
 
 export const MAX_QUANTITY = 20;
 const MAX_CARTS = 10_000;
-const COOKIE = "cart";
+const COOKIE = "cart"; // Set by src/proxy.ts.
 
 /** Variant ID to quantity. */
 type Cart = Map<number, number>;
@@ -29,20 +29,9 @@ const carts = (shared.carts ??= new Map<string, Cart>());
 
 /** The visitor's cart. The cookie holds only an ID, so there's nothing in it to tamper with. */
 async function currentCart() {
-  const jar = await cookies();
-  let id = jar.get(COOKIE)?.value ?? "";
-  let cart = carts.get(id);
-  if (!cart) {
-    id = randomUUID();
-    cart = new Map();
-    jar.set(COOKIE, id, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 14,
-    });
-  }
+  const id = (await cookies()).get(COOKIE)?.value;
+  if (!id) throw new Error("No cart cookie. src/proxy.ts should set one on every request.");
+  const cart = carts.get(id) ?? new Map();
   // Most recently used last, so the oldest cart goes when there are too many.
   carts.delete(id);
   carts.set(id, cart);
@@ -51,7 +40,6 @@ async function currentCart() {
   return cart;
 }
 
-/** Creates the cart on the first visit, so it exists before the first add. */
 export async function getCart() {
   return summarize(await currentCart());
 }

@@ -1,4 +1,4 @@
-import type { AnamClient } from "@anam-ai/js-sdk";
+import type { AnamClient, ToolCallHandler, ToolCallStartedPayload } from "@anam-ai/js-sdk";
 import type { AddResult, CartSummary } from "@/lib/cart";
 import type { ProductDetails, ProductSummary } from "@/lib/catalog";
 
@@ -12,12 +12,7 @@ export const CART_UPDATED = "cart:updated";
 class StoreError extends Error {}
 
 async function getJson<T>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
-  // Stop when the call ends, or after 6 seconds. That's inside the tools'
-  // 8-second timeout, so the persona always hears what happened.
-  const response = await fetch(url, {
-    ...init,
-    signal: AbortSignal.any([signal, AbortSignal.timeout(6_000)]),
-  });
+  const response = await fetch(url, { ...init, signal });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new StoreError(body.error ?? `Request failed with ${response.status}`);
@@ -52,20 +47,45 @@ function pickVariant(product: ProductDetails, wanted: Record<string, string>) {
   return { variant };
 }
 
-/**
- * `signal` is aborted when the call ends. Every request uses it, so a handler
- * that's still running can't change the cart or the cards after that.
- */
+/** `callSignal` is aborted when the call ends. */
 export function registerShoppingTools(
   client: AnamClient,
   ui: { showProducts(products: ProductSummary[]): void },
-  signal: AbortSignal,
+  callSignal: AbortSignal,
 ) {
+  const running = new Map<string, AbortController>();
+
+  /**
+   * Gives each tool call one signal for all of its requests. It's aborted
+   * when the call ends, when the SDK reports the tool call failed, or 6
+   * seconds after the tool call started. That's inside the tools' 8-second
+   * timeout, so the persona hears what happened, and a handler that's still
+   * running can't change the cart or the cards afterwards.
+   */
+  function toolHandler(
+    run: (args: ToolCallStartedPayload["arguments"], signal: AbortSignal) => Promise<string>,
+  ): ToolCallHandler {
+    return {
+      onStart: async ({ arguments: args, toolCallId }) => {
+        const failed = new AbortController();
+        running.set(toolCallId, failed);
+        const signal = AbortSignal.any([callSignal, failed.signal, AbortSignal.timeout(6_000)]);
+        try {
+          return await run(args, signal);
+        } finally {
+          running.delete(toolCallId);
+        }
+      },
+      onFail: async ({ toolCallId }) => running.get(toolCallId)?.abort(),
+    };
+  }
+
   let latestSearch = 0;
 
   const stops = [
-    client.registerToolCallHandler("search_products", {
-      onStart: async ({ arguments: args }) => {
+    client.registerToolCallHandler(
+      "search_products",
+      toolHandler(async (args, signal) => {
         const search = ++latestSearch;
         const params = new URLSearchParams({ q: String(args.query ?? "") });
         if (args.max_price) params.set("max_price", String(args.max_price));
@@ -88,11 +108,12 @@ export function registerShoppingTools(
               `- ${product.title} (handle: ${product.handle}): from ${product.price}${product.available ? "" : ", SOLD OUT"}`,
           ),
         ].join("\n");
-      },
-    }),
+      }),
+    ),
 
-    client.registerToolCallHandler("get_product", {
-      onStart: async ({ arguments: args }) => {
+    client.registerToolCallHandler(
+      "get_product",
+      toolHandler(async (args, signal) => {
         const handle = String(args.handle || productOnScreen());
         if (!handle) return "Error: handle is required. Search for the product first.";
         const product = await getJson<ProductDetails>(
@@ -117,11 +138,12 @@ export function registerShoppingTools(
         ]
           .filter(Boolean)
           .join("\n");
-      },
-    }),
+      }),
+    ),
 
-    client.registerToolCallHandler("add_to_cart", {
-      onStart: async ({ arguments: args }) => {
+    client.registerToolCallHandler(
+      "add_to_cart",
+      toolHandler(async (args, signal) => {
         const handle = String(args.handle || productOnScreen());
         if (!handle) return "Error: handle is required.";
         const product = await getJson<ProductDetails>(
@@ -158,19 +180,20 @@ export function registerShoppingTools(
         window.dispatchEvent(new CustomEvent(CART_UPDATED));
         const options = variant.title === "Default Title" ? "" : ` (${variant.title})`;
         return `Added ${cart.added} × ${product.title}${options}, ${variant.price} each. The cart now has ${cart.itemCount} items, ${cart.total} in total.`;
-      },
-    }),
+      }),
+    ),
 
-    client.registerToolCallHandler("get_cart", {
-      onStart: async () => {
+    client.registerToolCallHandler(
+      "get_cart",
+      toolHandler(async (_args, signal) => {
         const cart = await getJson<CartSummary>("/api/cart", signal);
         if (cart.itemCount === 0) return "The cart is empty.";
         return [
           `${cart.itemCount} items, ${cart.total} in total:`,
           ...cart.items.map((item) => `- ${item.quantity} × ${item.title}: ${item.linePrice}`),
         ].join("\n");
-      },
-    }),
+      }),
+    ),
   ];
 
   return () => stops.forEach((stop) => stop());

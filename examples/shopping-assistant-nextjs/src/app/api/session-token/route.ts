@@ -12,7 +12,7 @@ export async function POST(request: Request) {
 
   // Check the body before anything that costs a call.
   const body = await request.json().catch(() => null);
-  if (typeof body !== "object" || body === null) {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return NextResponse.json({ error: "Send a JSON object." }, { status: 400 });
   }
   const path = typeof body.path === "string" ? body.path.slice(0, 200) : "/";

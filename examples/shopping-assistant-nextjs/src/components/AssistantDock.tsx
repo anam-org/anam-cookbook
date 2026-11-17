@@ -40,6 +40,12 @@ export function AssistantDock() {
     const attempt = new AbortController();
     let client: AnamClient | null = null;
     let stopTools = () => {};
+    // Stops this attempt's own client, never one from a newer call.
+    const stopClient = () => {
+      void client?.stopStreaming().catch((error) => {
+        console.error("Couldn't stop the avatar session", error);
+      });
+    };
     const cleanup = () => {
       if (attempt.signal.aborted) return;
       attempt.abort();
@@ -47,9 +53,7 @@ export function AssistantDock() {
       clientRef.current = null;
       readyRef.current = false;
       stopTools();
-      void client?.stopStreaming().catch((error) => {
-        console.error("Couldn't stop the avatar session", error);
-      });
+      stopClient();
     };
     cleanupRef.current = cleanup;
     setStatus("connecting");
@@ -94,8 +98,14 @@ export function AssistantDock() {
       });
 
       await client.streamToVideoElement("assistant-video");
+      // Stopping does nothing while the session is still starting, so if the
+      // shopper cancelled during startup, stop it now that it has started.
+      if (attempt.signal.aborted) stopClient();
     } catch (err) {
-      if (attempt.signal.aborted) return;
+      if (attempt.signal.aborted) {
+        stopClient();
+        return;
+      }
       cleanup();
       const timedOut = err instanceof DOMException && err.name === "TimeoutError";
       setError(

@@ -30,8 +30,8 @@ pnpm dev
 - `src/config/assistant.ts` defines the four client tools, the system prompt and the greeting. `describePage()` turns the page path into a sentence for the prompt, using the catalogue on the server.
 - `src/app/api/session-token/route.ts` checks the visitor's call limits and mints a session token with the persona config inline. The API key never reaches the browser.
 - `src/lib/rate-limit.ts` caps calls per visitor and per store. The counts are in memory; in production, keep them in Redis or your database and update them atomically.
-- `src/lib/shopping-tools.ts` handles the tools in the browser with `client.registerToolCallHandler()`. Each handler calls the store's API and returns text for the persona to read. Its requests stop when the call ends, and give up after 6 seconds so the persona hears what happened.
+- `src/lib/shopping-tools.ts` handles the tools in the browser with `client.registerToolCallHandler()`. Each handler calls the store's API and returns text for the persona to read. Each tool call's requests stop when the call ends or the tool call fails, and give up 6 seconds after it started, so the persona hears what happened.
 - `src/components/AssistantDock.tsx` starts and ends the call, shows the product cards, and tells the persona when the shopper opens another page.
-- `src/lib/catalog.ts`, `src/lib/cart.ts`, `src/lib/use-cart.ts` and the `api/products` and `api/cart` routes are the store itself.
+- `src/proxy.ts` gives each visitor a cart ID on their first request. `src/lib/catalog.ts`, `src/lib/cart.ts`, `src/lib/use-cart.ts` and the `api/products` and `api/cart` routes are the store itself.
 
 To check types, run `pnpm typecheck`. It generates Next.js's route types first, which `tsc` needs.

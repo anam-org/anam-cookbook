@@ -60,6 +60,7 @@ EXAMPLE=../anam-cookbook/examples/shopping-assistant-nextjs/src
 
 mkdir -p src/lib src/components src/app/cart src/app/api/cart/add \
   "src/app/api/products/[handle]" "src/app/products/[handle]"
+cp "$EXAMPLE/proxy.ts" src/
 cp "$EXAMPLE/lib/catalog.ts" "$EXAMPLE/lib/cart.ts" "$EXAMPLE/lib/use-cart.ts" src/lib/
 cp "$EXAMPLE/components/CartCount.tsx" "$EXAMPLE/components/AddToCartForm.tsx" src/components/
 cp "$EXAMPLE/app/layout.tsx" "$EXAMPLE/app/page.tsx" src/app/
@@ -74,7 +75,8 @@ cp "$EXAMPLE/app/api/cart/add/route.ts" src/app/api/cart/add/
 This overwrites the scaffold's `layout.tsx` and `page.tsx`. The layout renders the `AssistantDock` we'll build below, and a few store files import from `shopping-tools.ts`, so the app won't compile until we've written both. Here's what you copied:
 
 - `src/lib/catalog.ts`: the six products with their options and variants, plus `searchProducts()` and `getProduct()`. Size 11 Slate of the Trail Runner Shoe and size M of the Packable Rain Shell are sold out, so you can see how Mia handles that.
-- `src/lib/cart.ts`: a cart kept in server memory under a random ID in a cookie, with `getCart()` and `addToCart()`. Each add reads and writes the cart in one step, so two adds at the same moment both count. A real store uses its platform's cart instead.
+- `src/proxy.ts`: gives each visitor a cart ID in a cookie on their first request, before any page or route runs. Every later request carries the same ID, so two adds at once can't each start a different cart.
+- `src/lib/cart.ts`: carts kept in server memory under that ID, with `getCart()` and `addToCart()`. Each add reads and writes the cart in one step, so two adds at the same moment both count. A real store uses its platform's cart instead.
 - `src/lib/use-cart.ts`: a `useCart()` hook that fetches the cart and fetches it again whenever something changes it.
 - `src/app/api/products/route.ts` (`GET ?q=`), `src/app/api/products/[handle]/route.ts`, `src/app/api/cart/route.ts` and `src/app/api/cart/add/route.ts`: JSON endpoints over those two files.
 - The home page, `products/[handle]` page, cart page, `CartCount` and `AddToCartForm` components.
@@ -289,7 +291,7 @@ export async function POST(request: Request) {
 
   // Check the body before anything that costs a call.
   const body = await request.json().catch(() => null);
-  if (typeof body !== "object" || body === null) {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return NextResponse.json({ error: "Send a JSON object." }, { status: 400 });
   }
   const path = typeof body.path === "string" ? body.path.slice(0, 200) : "/";
@@ -435,7 +437,7 @@ Create `src/lib/shopping-tools.ts`. It starts with a small fetch helper and a wa
 ```typescript
 // src/lib/shopping-tools.ts
 
-import type { AnamClient } from "@anam-ai/js-sdk";
+import type { AnamClient, ToolCallHandler, ToolCallStartedPayload } from "@anam-ai/js-sdk";
 import type { AddResult, CartSummary } from "@/lib/cart";
 import type { ProductDetails, ProductSummary } from "@/lib/catalog";
 
@@ -449,12 +451,7 @@ export const CART_UPDATED = "cart:updated";
 class StoreError extends Error {}
 
 async function getJson<T>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
-  // Stop when the call ends, or after 6 seconds. That's inside the tools'
-  // 8-second timeout, so the persona always hears what happened.
-  const response = await fetch(url, {
-    ...init,
-    signal: AbortSignal.any([signal, AbortSignal.timeout(6_000)]),
-  });
+  const response = await fetch(url, { ...init, signal });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new StoreError(body.error ?? `Request failed with ${response.status}`);
@@ -468,7 +465,7 @@ function productOnScreen() {
 }
 ```
 
-`getJson` takes an `AbortSignal` that the dock aborts when the call ends. Unregistering a handler doesn't stop one that's already running, so without the signal a slow lookup could still add to the cart after the shopper has hung up. The 6-second deadline is shorter than the tools' 8-second `toolTimeoutSeconds`, so when the store is slow the persona gets an answer from the handler rather than a timeout. `StoreError` marks a refusal from the store itself, such as a sold-out option, which the add-to-cart handler treats differently from a request that got no answer.
+`getJson` passes an `AbortSignal` to `fetch`, so a request stops when its signal is aborted. We'll see where the signal comes from in a moment. `StoreError` marks a refusal from the store itself, such as a sold-out option, which the add-to-cart handler treats differently from a request that got no answer.
 
 The persona passes options as an object like `{"Size": "9", "Colour": "Moss"}`. `pickVariant` turns that into one variant, or tells us which options are still missing:
 
@@ -498,23 +495,48 @@ function pickVariant(product: ProductDetails, wanted: Record<string, string>) {
 
 LLMs are loose with names. The store says "Colour" and the model may write "Color" or "colour", so the match ignores case and spelling.
 
-Here's the search handler:
+Here's the start of `registerShoppingTools`, with a small wrapper every handler uses, and the search handler:
 
 ```typescript
-/**
- * `signal` is aborted when the call ends. Every request uses it, so a handler
- * that's still running can't change the cart or the cards after that.
- */
+/** `callSignal` is aborted when the call ends. */
 export function registerShoppingTools(
   client: AnamClient,
   ui: { showProducts(products: ProductSummary[]): void },
-  signal: AbortSignal,
+  callSignal: AbortSignal,
 ) {
+  const running = new Map<string, AbortController>();
+
+  /**
+   * Gives each tool call one signal for all of its requests. It's aborted
+   * when the call ends, when the SDK reports the tool call failed, or 6
+   * seconds after the tool call started. That's inside the tools' 8-second
+   * timeout, so the persona hears what happened, and a handler that's still
+   * running can't change the cart or the cards afterwards.
+   */
+  function toolHandler(
+    run: (args: ToolCallStartedPayload["arguments"], signal: AbortSignal) => Promise<string>,
+  ): ToolCallHandler {
+    return {
+      onStart: async ({ arguments: args, toolCallId }) => {
+        const failed = new AbortController();
+        running.set(toolCallId, failed);
+        const signal = AbortSignal.any([callSignal, failed.signal, AbortSignal.timeout(6_000)]);
+        try {
+          return await run(args, signal);
+        } finally {
+          running.delete(toolCallId);
+        }
+      },
+      onFail: async ({ toolCallId }) => running.get(toolCallId)?.abort(),
+    };
+  }
+
   let latestSearch = 0;
 
   const stops = [
-    client.registerToolCallHandler("search_products", {
-      onStart: async ({ arguments: args }) => {
+    client.registerToolCallHandler(
+      "search_products",
+      toolHandler(async (args, signal) => {
         const search = ++latestSearch;
         const params = new URLSearchParams({ q: String(args.query ?? "") });
         if (args.max_price) params.set("max_price", String(args.max_price));
@@ -537,11 +559,17 @@ export function registerShoppingTools(
               `- ${product.title} (handle: ${product.handle}): from ${product.price}${product.available ? "" : ", SOLD OUT"}`,
           ),
         ].join("\n");
-      },
-    }),
+      }),
+    ),
 ```
 
-The handler does two things with the results. It shows them to the shopper as cards with `ui.showProducts()`, and it returns them to the persona as text. The text includes each product's handle, so the persona can pass it to `get_product` or `add_to_cart` later.
+`toolHandler` gives each tool call one signal for all of its requests. The signal is aborted in three cases:
+
+- **The call ends.** The dock aborts `callSignal`. Unregistering a handler doesn't stop one that's already running, so without this a slow lookup could still add to the cart after the shopper has hung up.
+- **The SDK reports that the tool call failed.** `onFail` aborts that call's requests.
+- **6 seconds pass.** The deadline starts when the tool call does and covers every request in it, so add-to-cart's lookup and POST share it. It's shorter than the tools' 8-second `toolTimeoutSeconds`, so when the store is slow the persona gets an answer from the handler rather than a timeout.
+
+The search handler does two things with the results. It shows them to the shopper as cards with `ui.showProducts()`, and it returns them to the persona as text. The text includes each product's handle, so the persona can pass it to `get_product` or `add_to_cart` later.
 
 The results are written for a model to read: facts first, no markup. When nothing matches, the result also says what to do next, so the persona tries a broader word or asks a question instead of making something up.
 
@@ -550,8 +578,9 @@ Every search replaces the cards, even with an empty list, so cards from an earli
 `get_product` gives the persona everything it needs to answer a detail question or recommend a size. With no handle, it looks up the product on screen:
 
 ```typescript
-    client.registerToolCallHandler("get_product", {
-      onStart: async ({ arguments: args }) => {
+    client.registerToolCallHandler(
+      "get_product",
+      toolHandler(async (args, signal) => {
         const handle = String(args.handle || productOnScreen());
         if (!handle) return "Error: handle is required. Search for the product first.";
         const product = await getJson<ProductDetails>(
@@ -576,15 +605,16 @@ Every search replaces the cards, even with an empty list, so cards from an earli
         ]
           .filter(Boolean)
           .join("\n");
-      },
-    }),
+      }),
+    ),
 ```
 
 The add-to-cart handler is the longest, because most of it is about the ways an add can go wrong:
 
 ```typescript
-    client.registerToolCallHandler("add_to_cart", {
-      onStart: async ({ arguments: args }) => {
+    client.registerToolCallHandler(
+      "add_to_cart",
+      toolHandler(async (args, signal) => {
         const handle = String(args.handle || productOnScreen());
         if (!handle) return "Error: handle is required.";
         const product = await getJson<ProductDetails>(
@@ -621,8 +651,8 @@ The add-to-cart handler is the longest, because most of it is about the ways an 
         window.dispatchEvent(new CustomEvent(CART_UPDATED));
         const options = variant.title === "Default Title" ? "" : ` (${variant.title})`;
         return `Added ${cart.added} × ${product.title}${options}, ${variant.price} each. The cart now has ${cart.itemCount} items, ${cart.total} in total.`;
-      },
-    }),
+      }),
+    ),
 ```
 
 Each result tells the persona what happened and what to say next:
@@ -630,7 +660,7 @@ Each result tells the persona what happened and what to say next:
 - **Options missing** - "Not added. Ask which Size (8, 9, 10, 11) they want." The persona asks the shopper instead of guessing.
 - **Sold out** - the result lists what is available, so the persona can offer something else.
 - **Refused by the store** - a quantity outside 1 to 20, or an option that sold out a moment ago, comes back as an error. `getJson` throws it, and the SDK sends the message to the persona.
-- **No answer** - after a timeout or network error we can't tell whether the add went through. The result tells the persona to check with `get_cart` before trying again, so a retry doesn't add the item twice.
+- **No answer** - after a timeout or network error we can't tell whether the add went through. The result asks the persona to check with `get_cart` before trying again. That makes a double add less likely, but it relies on the model following the instruction. Reliable deduplication needs the app to track operations: give each add an ID, and have the server ignore an ID it has already applied.
 - **Added** - the result uses the quantity the server says it added, and gives the new cart total.
 
 After a successful add, the handler dispatches a `cart:updated` event. The header's `CartCount` component listens for it and fetches the cart again, so the count updates straight away. The Shopify app does the same job for themes by dispatching `cart:update` and `cart:refresh` events, and by re-rendering Dawn's cart icon.
@@ -638,16 +668,17 @@ After a successful add, the handler dispatches a `cart:updated` event. The heade
 `get_cart` reads the cart back, so the persona can answer "what's in my cart?" from the real cart rather than from memory:
 
 ```typescript
-    client.registerToolCallHandler("get_cart", {
-      onStart: async () => {
+    client.registerToolCallHandler(
+      "get_cart",
+      toolHandler(async (_args, signal) => {
         const cart = await getJson<CartSummary>("/api/cart", signal);
         if (cart.itemCount === 0) return "The cart is empty.";
         return [
           `${cart.itemCount} items, ${cart.total} in total:`,
           ...cart.items.map((item) => `- ${item.quantity} × ${item.title}: ${item.linePrice}`),
         ].join("\n");
-      },
-    }),
+      }),
+    ),
   ];
 ```
 
@@ -717,7 +748,7 @@ When the shopper clicks **Talk to Mia**, `start()` gets a token, creates the cli
       client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onGreeting);
 ```
 
-Passing `setProducts` as `showProducts` connects the search handler to React state, and the dock renders the cards under the video. The rest of `start()` listens for `CONNECTION_ESTABLISHED` and `CONNECTION_CLOSED` and calls `client.streamToVideoElement("assistant-video")`, the same as the [client-side tools](/cookbook/client-side-tools) recipe. The `attempt` controller makes events from an ended call harmless if the shopper starts a new one, and its signal is the one the tool handlers use, so ending the call also stops their requests. While the call is connecting, the button reads **Cancel** and aborts the same controller, and the token request gives up after 20 seconds.
+Passing `setProducts` as `showProducts` connects the search handler to React state, and the dock renders the cards under the video. The rest of `start()` listens for `CONNECTION_ESTABLISHED` and `CONNECTION_CLOSED` and calls `client.streamToVideoElement("assistant-video")`, the same as the [client-side tools](/cookbook/client-side-tools) recipe. The `attempt` controller makes events from an ended call harmless if the shopper starts a new one, and its signal is the one the tool handlers use, so ending the call also stops their requests. While the call is connecting, the button reads **Cancel** and aborts the same controller, and the token request gives up after 20 seconds. In SDK 4.29.2, `stopStreaming()` does nothing while the session is still starting, so after `streamToVideoElement()` returns, `start()` checks whether that attempt was cancelled and stops its own client if so.
 
 `startPath` covers a shopper who opens another page while the call is still connecting. The persona can't take context until it starts the greeting, so `onGreeting` sends the page they're on now if it has changed.
 
