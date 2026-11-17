@@ -76,7 +76,7 @@ This overwrites the scaffold's `layout.tsx` and `page.tsx`. The layout renders t
 
 - `src/lib/catalog.ts`: the six products with their options and variants, plus `searchProducts()` and `getProduct()`. Size 11 Slate of the Trail Runner Shoe and size M of the Packable Rain Shell are sold out, so you can see how Mia handles that.
 - `src/proxy.ts`: gives each visitor a cart ID in a cookie on their first request, before any page or route runs. Every later request carries the same ID, so two adds at once can't each start a different cart.
-- `src/lib/cart.ts`: carts kept in server memory under that ID, with `getCart()` and `addToCart()`. Each add reads and writes the cart in one step, so two adds at the same moment both count. A real store uses its platform's cart instead.
+- `src/lib/cart.ts`: carts kept in server memory under that ID, with `getCart()` and `addToCart()`. Each add reads and writes the cart in one step, so two adds at the same moment both count. It keeps at most 10,000 carts and drops the least recently used, so a flood of new visitors can push out a shopper's cart. A real store uses its platform's cart instead.
 - `src/lib/use-cart.ts`: a `useCart()` hook that fetches the cart and fetches it again whenever something changes it.
 - `src/app/api/products/route.ts` (`GET ?q=`), `src/app/api/products/[handle]/route.ts`, `src/app/api/cart/route.ts` and `src/app/api/cart/add/route.ts`: JSON endpoints over those two files.
 - The home page, `products/[handle]` page, cart page, `CartCount` and `AddToCartForm` components.
@@ -644,7 +644,9 @@ The add-to-cart handler is the longest, because most of it is about the ways an 
           });
         } catch (error) {
           if (error instanceof StoreError) throw error;
-          // A timeout or network error: the add may still have gone through.
+          // A timeout or network error: the add may still have gone through,
+          // so refresh the header's count either way.
+          window.dispatchEvent(new CustomEvent(CART_UPDATED));
           return "Not sure it was added: the store didn't answer. Call get_cart to check before adding it again.";
         }
         // Tells the header's cart count to refresh.

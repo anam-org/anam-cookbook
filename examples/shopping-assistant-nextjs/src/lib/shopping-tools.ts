@@ -173,7 +173,9 @@ export function registerShoppingTools(
           });
         } catch (error) {
           if (error instanceof StoreError) throw error;
-          // A timeout or network error: the add may still have gone through.
+          // A timeout or network error: the add may still have gone through,
+          // so refresh the header's count either way.
+          window.dispatchEvent(new CustomEvent(CART_UPDATED));
           return "Not sure it was added: the store didn't answer. Call get_cart to check before adding it again.";
         }
         // Tells the header's cart count to refresh.
