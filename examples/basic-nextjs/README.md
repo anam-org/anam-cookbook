@@ -4,7 +4,7 @@ A simple Next.js application that demonstrates how to integrate an Anam AI perso
 
 ## Prerequisites
 
-- Node.js 18+ installed
+- Node.js 20.9+ installed
 - An Anam account with API access ([sign up at lab.anam.ai](https://lab.anam.ai))
 
 ## Setup
