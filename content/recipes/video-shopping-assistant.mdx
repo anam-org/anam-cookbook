@@ -31,7 +31,7 @@ There are three parts:
 
 ## Prerequisites
 
-- Node.js 22 or later and pnpm 10 or later
+- Node.js 22 or later and pnpm 10.26 or later
 - An Anam account and an API key from [Anam Lab](https://lab.anam.ai)
 
 ## Project setup
@@ -60,7 +60,7 @@ EXAMPLE=../anam-cookbook/examples/shopping-assistant-nextjs/src
 
 mkdir -p src/lib src/components src/app/cart src/app/api/cart/add \
   "src/app/api/products/[handle]" "src/app/products/[handle]"
-cp "$EXAMPLE/lib/catalog.ts" "$EXAMPLE/lib/cart.ts" src/lib/
+cp "$EXAMPLE/lib/catalog.ts" "$EXAMPLE/lib/cart.ts" "$EXAMPLE/lib/use-cart.ts" src/lib/
 cp "$EXAMPLE/components/CartCount.tsx" "$EXAMPLE/components/AddToCartForm.tsx" src/components/
 cp "$EXAMPLE/app/layout.tsx" "$EXAMPLE/app/page.tsx" src/app/
 cp "$EXAMPLE/app/cart/page.tsx" src/app/cart/
@@ -74,7 +74,8 @@ cp "$EXAMPLE/app/api/cart/add/route.ts" src/app/api/cart/add/
 This overwrites the scaffold's `layout.tsx` and `page.tsx`. The layout renders the `AssistantDock` we'll build below, and a few store files import from `shopping-tools.ts`, so the app won't compile until we've written both. Here's what you copied:
 
 - `src/lib/catalog.ts`: the six products with their options and variants, plus `searchProducts()` and `getProduct()`. Size 11 Slate of the Trail Runner Shoe and size M of the Packable Rain Shell are sold out, so you can see how Mia handles that.
-- `src/lib/cart.ts`: a cart stored in a cookie, with `getCart()` and `addToCart()`.
+- `src/lib/cart.ts`: a cart kept in server memory under a random ID in a cookie, with `getCart()` and `addToCart()`. Each add reads and writes the cart in one step, so two adds at the same moment both count. A real store uses its platform's cart instead.
+- `src/lib/use-cart.ts`: a `useCart()` hook that fetches the cart and fetches it again whenever something changes it.
 - `src/app/api/products/route.ts` (`GET ?q=`), `src/app/api/products/[handle]/route.ts`, `src/app/api/cart/route.ts` and `src/app/api/cart/add/route.ts`: JSON endpoints over those two files.
 - The home page, `products/[handle]` page, cart page, `CartCount` and `AddToCartForm` components.
 
@@ -99,6 +100,7 @@ Let's create `src/config/assistant.ts`, starting with a small helper so every to
 ```typescript
 // src/config/assistant.ts
 
+import { MAX_QUANTITY } from "@/lib/cart";
 import { getProduct, STORE_NAME } from "@/lib/catalog";
 
 // Client tools run in the shopper's browser (src/lib/shopping-tools.ts) and
@@ -158,7 +160,12 @@ export const tools = [
           description: "Option name to chosen value, using the names get_product returned.",
           additionalProperties: { type: "string" },
         },
-        quantity: { type: "integer", description: "Default 1." },
+        quantity: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_QUANTITY,
+          description: `How many to add, from 1 to ${MAX_QUANTITY}. Default 1.`,
+        },
       },
     },
   ),
@@ -174,6 +181,7 @@ A few details in these descriptions matter:
 - **"Leave handle empty for the product on screen"** lets the shopper say "add this one" on a product page. The browser handler fills in the handle from the URL.
 - **"Only after they clearly say they want it"** keeps the persona from adding things the shopper only asked about.
 - **The options example** shows the LLM the shape we expect, so it passes `{"Size": "9", "Colour": "Moss"}` rather than a single string like `"9 Moss"`.
+- **`minimum` and `maximum` on `quantity`** tell the model what the store accepts. The add-to-cart route checks it again and rejects anything outside that range, rather than quietly changing it.
 
 The Shopify app has the same four tools plus `update_cart_quantity`, `store_policies` (which answers from the shop's own policy pages), `point_at` (which rings a control on the page) and `open_page`. The merchant can turn off the cart, navigation and page-reading abilities, and the app leaves those tools out of the session.
 
@@ -203,7 +211,8 @@ export function describePage(path: string) {
     };
   }
   if (path === "/cart") return { text: "They are on the cart page." };
-  return { text: "They are on the home page, which lists every product." };
+  if (path === "/") return { text: "They are on the home page, which lists every product." };
+  return { text: "They are on a page of the store." };
 }
 ```
 
@@ -278,25 +287,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "ANAM_API_KEY is not configured" }, { status: 500 });
   }
 
+  // Check the body before anything that costs a call.
+  const body = await request.json().catch(() => null);
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Send a JSON object." }, { status: 400 });
+  }
+  const path = typeof body.path === "string" ? body.path.slice(0, 200) : "/";
+  const page = describePage(path);
+
   // A visitor is an ID in an httpOnly cookie. Someone who clears it gets a
   // new one, so the store-wide cap is what really bounds your spend.
   const jar = await cookies();
   let visitorId = jar.get("visitor")?.value;
   if (!visitorId) {
     visitorId = randomUUID();
-    jar.set("visitor", visitorId, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 365 });
+    jar.set("visitor", visitorId, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    });
   }
   const verdict = takeCallSlot(visitorId);
   if (!verdict.ok) {
+    // A wait of more than 10 minutes means a daily limit is full.
+    const error =
+      verdict.retryAfterSeconds > 600
+        ? "The assistant has reached its call limit for today."
+        : "Please wait a few minutes before starting another call.";
     return NextResponse.json(
-      { error: "The assistant is busy. Please try again in a little while." },
+      { error },
       { status: 429, headers: { "Retry-After": String(verdict.retryAfterSeconds) } },
     );
   }
-
-  const body = await request.json().catch(() => ({}));
-  const path = typeof body.path === "string" ? body.path.slice(0, 200) : "/";
-  const page = describePage(path);
 
   try {
     const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
@@ -328,10 +352,11 @@ export async function POST(request: Request) {
 }
 ```
 
-The route does three things in order:
+The route does four things in order:
 
+- **Checks the body** is a JSON object. A malformed request gets a 400 before it can use up a call.
 - **Identifies the visitor** with a random ID in an httpOnly cookie, so the per-visitor limits have something to count.
-- **Checks the limits** before it does anything that costs money. A refused request gets a 429 with `Retry-After`.
+- **Checks the limits** before it does anything that costs money. A refused request gets a 429 with `Retry-After`, and a message that says whether to wait a few minutes or until tomorrow.
 - **Mints the token** with `maxSessions: 1`, so each token starts one session. Every call gets a fresh token with a fresh prompt for the page it started on.
 
 Errors from Anam are logged on the server, and the shopper sees a short, safe message.
@@ -350,8 +375,8 @@ Create `src/lib/rate-limit.ts`:
 // The session-token endpoint is public, and every session uses minutes on
 // your Anam account. These limits cap calls per visitor and for the whole
 // store. The counts live in memory, so they reset when the server restarts
-// and aren't shared between instances: keep them in Redis or your database
-// in production.
+// and aren't shared between instances. In production, keep them in Redis or
+// your database and update them atomically.
 
 type Window = { limit: number; ms: number };
 
@@ -368,34 +393,38 @@ const counts = new Map<string, { count: number; expires: number }>();
 
 export type Verdict = { ok: true } | { ok: false; retryAfterSeconds: number };
 
-/** Counts one request in each fixed window and stops at the first that's full. */
-function check(key: string, windows: Window[], now: number): Verdict {
+/**
+ * Checks every window before counting anything, so a refused request stores
+ * nothing and doesn't use up another window's calls. Only accepted calls are
+ * stored, so the store's daily cap also caps the size of the map.
+ */
+export function takeCallSlot(visitorId: string, now = Date.now()): Verdict {
+  const windows = [
+    ...PER_VISITOR.map((window) => ({ ...window, key: `visitor:${visitorId}` })),
+    ...STORE_PER_DAY.map((window) => ({ ...window, key: "store" })),
+  ].map(({ key, limit, ms }) => {
+    const start = Math.floor(now / ms) * ms;
+    const id = `${key}:${ms}:${start}`;
+    return { id, limit, expires: start + ms, count: counts.get(id)?.count ?? 0 };
+  });
+  const full = windows.find((window) => window.count >= window.limit);
+  if (full) return { ok: false, retryAfterSeconds: Math.ceil((full.expires - now) / 1000) };
+
+  for (const [id, entry] of counts) if (entry.expires <= now) counts.delete(id);
   for (const window of windows) {
-    const start = Math.floor(now / window.ms) * window.ms;
-    const id = `${key}:${window.ms}:${start}`;
-    const count = (counts.get(id)?.count ?? 0) + 1;
-    counts.set(id, { count, expires: start + window.ms });
-    if (count > window.limit) {
-      return { ok: false, retryAfterSeconds: Math.ceil((start + window.ms - now) / 1000) };
-    }
+    counts.set(window.id, { count: window.count + 1, expires: window.expires });
   }
   return { ok: true };
 }
-
-/** The visitor's limits first, so one busy visitor doesn't use up the store's calls. */
-export function takeCallSlot(visitorId: string, now = Date.now()): Verdict {
-  for (const [id, entry] of counts) if (entry.expires <= now) counts.delete(id);
-  const visitor = check(`visitor:${visitorId}`, PER_VISITOR, now);
-  if (!visitor.ok) return visitor;
-  return check("store", STORE_PER_DAY, now);
-}
 ```
 
-Each limit is a fixed window aligned to the clock: a visitor can start 6 calls in each 10-minute window and 30 in each UTC day, and the store can start 500 a day. The visitor's limits are checked first, so a visitor who's over their limit doesn't also use up the store's calls.
+Each limit is a fixed window aligned to the clock: a visitor can start 6 calls in each 10-minute window and 30 in each UTC day, and the store can start 500 a day. `takeCallSlot` checks every window before it counts anything, so a refused request doesn't use up any calls or store anything. Only accepted calls are stored, which keeps the map small.
+
+The in-memory map works for one server. In production, keep the counts in Redis or your database and take a slot in one atomic step, such as a Redis `INCR` or a single SQL `UPDATE` with the limit in its `WHERE` clause, so two instances can't both take the last call.
 
 These are the Shopify app's numbers. A visitor gets 6 calls per 10 minutes and 30 a day, and the store's daily cap is the merchant's "Calls per day" setting, which starts at 500. The app keeps the counts in Postgres, so they hold across serverless instances and deploys. A Shopify visitor is the signed-in customer, or a signed visitor ID the app issues to a guest.
 
-A per-visitor limit only holds visitors who keep their cookie. Someone who clears it gets a new ID, so the store-wide cap is what really bounds your spend. Set it to what you're willing to pay for in a day.
+A per-visitor limit only holds visitors who keep their cookie. Someone who clears it gets a new ID, so the store-wide cap is what really bounds your spend. Set it to what you're willing to pay for in a day. The trade-off is that a script that clears its cookie on every request can use up the day's calls and lock real shoppers out until the next UTC day. If that matters for your store, put bot protection or a per-IP limit in front of the route.
 
 ## Handling the tools in the browser
 
@@ -407,7 +436,7 @@ Create `src/lib/shopping-tools.ts`. It starts with a small fetch helper and a wa
 // src/lib/shopping-tools.ts
 
 import type { AnamClient } from "@anam-ai/js-sdk";
-import type { CartSummary } from "@/lib/cart";
+import type { AddResult, CartSummary } from "@/lib/cart";
 import type { ProductDetails, ProductSummary } from "@/lib/catalog";
 
 // Browser-side handlers for the client tools in src/config/assistant.ts.
@@ -416,11 +445,21 @@ import type { ProductDetails, ProductSummary } from "@/lib/catalog";
 
 export const CART_UPDATED = "cart:updated";
 
-async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? `Request failed with ${response.status}`);
-  return body as T;
+/** The store answered with an error, so nothing changed. */
+class StoreError extends Error {}
+
+async function getJson<T>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
+  // Stop when the call ends, or after 6 seconds. That's inside the tools'
+  // 8-second timeout, so the persona always hears what happened.
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.any([signal, AbortSignal.timeout(6_000)]),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new StoreError(body.error ?? `Request failed with ${response.status}`);
+  }
+  return response.json();
 }
 
 /** The product handle in the address bar, when the shopper is on a product page. */
@@ -428,6 +467,8 @@ function productOnScreen() {
   return location.pathname.match(/^\/products\/([\w-]+)$/)?.[1] ?? "";
 }
 ```
+
+`getJson` takes an `AbortSignal` that the dock aborts when the call ends. Unregistering a handler doesn't stop one that's already running, so without the signal a slow lookup could still add to the cart after the shopper has hung up. The 6-second deadline is shorter than the tools' 8-second `toolTimeoutSeconds`, so when the store is slow the persona gets an answer from the handler rather than a timeout. `StoreError` marks a refusal from the store itself, such as a sold-out option, which the add-to-cart handler treats differently from a request that got no answer.
 
 The persona passes options as an object like `{"Size": "9", "Colour": "Moss"}`. `pickVariant` turns that into one variant, or tells us which options are still missing:
 
@@ -460,21 +501,35 @@ LLMs are loose with names. The store says "Colour" and the model may write "Colo
 Here's the search handler:
 
 ```typescript
+/**
+ * `signal` is aborted when the call ends. Every request uses it, so a handler
+ * that's still running can't change the cart or the cards after that.
+ */
 export function registerShoppingTools(
   client: AnamClient,
   ui: { showProducts(products: ProductSummary[]): void },
+  signal: AbortSignal,
 ) {
+  let latestSearch = 0;
+
   const stops = [
     client.registerToolCallHandler("search_products", {
       onStart: async ({ arguments: args }) => {
+        const search = ++latestSearch;
         const params = new URLSearchParams({ q: String(args.query ?? "") });
         if (args.max_price) params.set("max_price", String(args.max_price));
-        const { products } = await getJson<{ products: ProductSummary[] }>(`/api/products?${params}`);
+        const { products } = await getJson<{ products: ProductSummary[] }>(
+          `/api/products?${params}`,
+          signal,
+        );
+        // A slow older search mustn't replace the cards from a newer one.
+        if (search !== latestSearch) return "A newer search replaced these results.";
         const shown = products.slice(0, 3);
+        // Clear the old cards too when nothing matches.
+        ui.showProducts(shown);
         if (shown.length === 0) {
           return `No products match "${args.query}". Try a broader word, or ask what they need it for.`;
         }
-        ui.showProducts(shown);
         return [
           `${shown.length} shown as cards beside you:`,
           ...shown.map(
@@ -490,6 +545,8 @@ The handler does two things with the results. It shows them to the shopper as ca
 
 The results are written for a model to read: facts first, no markup. When nothing matches, the result also says what to do next, so the persona tries a broader word or asks a question instead of making something up.
 
+Every search replaces the cards, even with an empty list, so cards from an earlier search don't stay on screen after a search that found nothing. `latestSearch` drops the results of a slow search that finishes after a newer one.
+
 `get_product` gives the persona everything it needs to answer a detail question or recommend a size. With no handle, it looks up the product on screen:
 
 ```typescript
@@ -497,14 +554,21 @@ The results are written for a model to read: facts first, no markup. When nothin
       onStart: async ({ arguments: args }) => {
         const handle = String(args.handle || productOnScreen());
         if (!handle) return "Error: handle is required. Search for the product first.";
-        const product = await getJson<ProductDetails>(`/api/products/${encodeURIComponent(handle)}`);
+        const product = await getJson<ProductDetails>(
+          `/api/products/${encodeURIComponent(handle)}`,
+          signal,
+        );
         const soldOut = product.variants.filter((variant) => !variant.available);
+        const prices = new Set(product.variants.map((variant) => variant.price));
         return [
           `${product.title}: from ${product.price}.`,
           product.available ? "In stock." : "SOLD OUT in every option.",
           ...product.options
             .filter((option) => option.name !== "Title")
             .map((option) => `${option.name}: ${option.values.join(", ")}`),
+          prices.size > 1
+            ? `Prices: ${product.variants.map((variant) => `${variant.title} ${variant.price}`).join("; ")}`
+            : "",
           soldOut.length > 0 && product.available
             ? `Sold out: ${soldOut.map((variant) => variant.title).join("; ")}`
             : "",
@@ -523,7 +587,10 @@ The add-to-cart handler is the longest, because most of it is about the ways an 
       onStart: async ({ arguments: args }) => {
         const handle = String(args.handle || productOnScreen());
         if (!handle) return "Error: handle is required.";
-        const product = await getJson<ProductDetails>(`/api/products/${encodeURIComponent(handle)}`);
+        const product = await getJson<ProductDetails>(
+          `/api/products/${encodeURIComponent(handle)}`,
+          signal,
+        );
         const { variant, missing } = pickVariant(product, args.options ?? {});
         if (missing) {
           return `Not added. Ask which ${missing
@@ -537,16 +604,23 @@ The add-to-cart handler is the longest, because most of it is about the ways an 
             others.map((candidate) => candidate.title).join("; ") || "none"
           }.`;
         }
-        const quantity = Number(args.quantity) > 0 ? Math.round(Number(args.quantity)) : 1;
-        const cart = await getJson<CartSummary>("/api/cart/add", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ variantId: variant.id, quantity }),
-        });
+        let cart: AddResult;
+        try {
+          // The server checks the quantity and says how many it added.
+          cart = await getJson<AddResult>("/api/cart/add", signal, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ variantId: variant.id, quantity: args.quantity ?? 1 }),
+          });
+        } catch (error) {
+          if (error instanceof StoreError) throw error;
+          // A timeout or network error: the add may still have gone through.
+          return "Not sure it was added: the store didn't answer. Call get_cart to check before adding it again.";
+        }
         // Tells the header's cart count to refresh.
         window.dispatchEvent(new CustomEvent(CART_UPDATED));
         const options = variant.title === "Default Title" ? "" : ` (${variant.title})`;
-        return `Added ${quantity} × ${product.title}${options}, ${variant.price} each. The cart now has ${cart.itemCount} items, ${cart.total} in total.`;
+        return `Added ${cart.added} × ${product.title}${options}, ${variant.price} each. The cart now has ${cart.itemCount} items, ${cart.total} in total.`;
       },
     }),
 ```
@@ -555,7 +629,9 @@ Each result tells the persona what happened and what to say next:
 
 - **Options missing** - "Not added. Ask which Size (8, 9, 10, 11) they want." The persona asks the shopper instead of guessing.
 - **Sold out** - the result lists what is available, so the persona can offer something else.
-- **Added** - the result confirms what went in and gives the new cart total.
+- **Refused by the store** - a quantity outside 1 to 20, or an option that sold out a moment ago, comes back as an error. `getJson` throws it, and the SDK sends the message to the persona.
+- **No answer** - after a timeout or network error we can't tell whether the add went through. The result tells the persona to check with `get_cart` before trying again, so a retry doesn't add the item twice.
+- **Added** - the result uses the quantity the server says it added, and gives the new cart total.
 
 After a successful add, the handler dispatches a `cart:updated` event. The header's `CartCount` component listens for it and fetches the cart again, so the count updates straight away. The Shopify app does the same job for themes by dispatching `cart:update` and `cart:refresh` events, and by re-rendering Dawn's cart icon.
 
@@ -564,7 +640,7 @@ After a successful add, the handler dispatches a `cart:updated` event. The heade
 ```typescript
     client.registerToolCallHandler("get_cart", {
       onStart: async () => {
-        const cart = await getJson<CartSummary>("/api/cart");
+        const cart = await getJson<CartSummary>("/api/cart", signal);
         if (cart.itemCount === 0) return "The cart is empty.";
         return [
           `${cart.itemCount} items, ${cart.total} in total:`,
@@ -602,7 +678,8 @@ async function fetchSessionToken(signal: AbortSignal): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: location.pathname }),
-    signal,
+    // Give up after 20 seconds, or as soon as the shopper cancels.
+    signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || typeof data.sessionToken !== "string") {
@@ -615,12 +692,15 @@ async function fetchSessionToken(signal: AbortSignal): Promise<string> {
 When the shopper clicks **Talk to Mia**, `start()` gets a token, creates the client and registers the tools before it starts streaming:
 
 ```typescript
+      const startPath = location.pathname;
       const token = await fetchSessionToken(attempt.signal);
       if (attempt.signal.aborted) return;
       client = createClient(token);
       clientRef.current = client;
 
-      stopTools = registerShoppingTools(client, { showProducts: setProducts });
+      // Ending the call aborts attempt.signal, which stops any tool work
+      // that's still running.
+      stopTools = registerShoppingTools(client, { showProducts: setProducts }, attempt.signal);
 
       // Context sent before the persona is ready is dropped, so page changes
       // are only sent once the greeting has started.
@@ -628,11 +708,18 @@ When the shopper clicks **Talk to Mia**, `start()` gets a token, creates the cli
         if (attempt.signal.aborted || event.role !== MessageRole.PERSONA) return;
         readyRef.current = true;
         client?.removeListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onGreeting);
+        // The prompt describes the page the call started on. If the shopper
+        // has moved on since, say where they are now.
+        if (location.pathname !== startPath) {
+          client?.addContext(`[visitor opened ${location.pathname}]`);
+        }
       };
       client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onGreeting);
 ```
 
-Passing `setProducts` as `showProducts` connects the search handler to React state, and the dock renders the cards under the video. The rest of `start()` listens for `CONNECTION_ESTABLISHED` and `CONNECTION_CLOSED` and calls `client.streamToVideoElement("assistant-video")`, the same as the [client-side tools](/cookbook/client-side-tools) recipe. The `attempt` controller makes events from an ended call harmless if the shopper starts a new one.
+Passing `setProducts` as `showProducts` connects the search handler to React state, and the dock renders the cards under the video. The rest of `start()` listens for `CONNECTION_ESTABLISHED` and `CONNECTION_CLOSED` and calls `client.streamToVideoElement("assistant-video")`, the same as the [client-side tools](/cookbook/client-side-tools) recipe. The `attempt` controller makes events from an ended call harmless if the shopper starts a new one, and its signal is the one the tool handlers use, so ending the call also stops their requests. While the call is connecting, the button reads **Cancel** and aborts the same controller, and the token request gives up after 20 seconds.
+
+`startPath` covers a shopper who opens another page while the call is still connecting. The persona can't take context until it starts the greeting, so `onGreeting` sends the page they're on now if it has changed.
 
 When the shopper opens another page during the call, we tell the persona with `addContext()`. It adds a message to the conversation without asking the persona to reply:
 
@@ -682,4 +769,4 @@ When we tested this against Anam's API with typed messages, the header's cart co
 
 If a call won't start, check the response from `/api/session-token` in your browser's Network panel and the terminal running `pnpm dev`. A 429 means you've hit a call limit: restart the dev server to clear the in-memory counts. If Mia talks about a product but nothing changes in the cart, look for a console warning from the SDK about a client tool with no handler, which means the tool names in `assistant.ts` and `shopping-tools.ts` don't match.
 
-To use this on your own store, point the handlers at your platform's catalogue and cart APIs. The tool definitions and prompt don't need to change. Try giving Mia a tool for your shipping and returns policy, or let her open pages for the shopper, as the Shopify app does.
+To use this on your own store, point the handlers at your platform's catalogue and cart APIs. The tool definitions and prompt don't need to change, with one caution. Product titles and descriptions go into tool results word for word, and here they're our own six products. If your catalogue includes text you don't control, such as marketplace sellers, supplier feeds or imported reviews, treat it as untrusted: put it inside clear delimiters in the tool result, tell the prompt that text inside them is data and never instructions, and keep the server-side checks on every cart change. Prompt wording alone won't stop an instruction hidden in a product description. Try giving Mia a tool for your shipping and returns policy, or let her open pages for the shopper, as the Shopify app does.

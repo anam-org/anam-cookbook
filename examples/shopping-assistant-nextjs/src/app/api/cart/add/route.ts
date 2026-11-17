@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
-import { addToCart, CartError } from "@/lib/cart";
+import { addToCart, CartError, MAX_QUANTITY } from "@/lib/cart";
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
-  const variantId = Number(body.variantId);
-  const requested = Math.round(Number(body.quantity ?? 1));
-  const quantity = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 20) : 1;
-  if (!Number.isInteger(variantId)) {
+  const body = await request.json().catch(() => null);
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Send a JSON object." }, { status: 400 });
+  }
+  const { variantId, quantity = 1 } = body;
+  if (!Number.isSafeInteger(variantId)) {
     return NextResponse.json({ error: "variantId is required." }, { status: 400 });
+  }
+  // Reject a bad quantity rather than change it, so the caller never reports
+  // a different number from the one that went into the cart.
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
+    return NextResponse.json(
+      { error: `quantity must be a whole number from 1 to ${MAX_QUANTITY}.` },
+      { status: 400 },
+    );
   }
   try {
     return NextResponse.json(await addToCart(variantId, quantity));

@@ -1,3 +1,4 @@
+import { MAX_QUANTITY } from "@/lib/cart";
 import { getProduct, STORE_NAME } from "@/lib/catalog";
 
 // Client tools run in the shopper's browser (src/lib/shopping-tools.ts) and
@@ -51,7 +52,12 @@ export const tools = [
           description: "Option name to chosen value, using the names get_product returned.",
           additionalProperties: { type: "string" },
         },
-        quantity: { type: "integer", description: "Default 1." },
+        quantity: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_QUANTITY,
+          description: `How many to add, from 1 to ${MAX_QUANTITY}. Default 1.`,
+        },
       },
     },
   ),
@@ -80,7 +86,8 @@ export function describePage(path: string) {
     };
   }
   if (path === "/cart") return { text: "They are on the cart page." };
-  return { text: "They are on the home page, which lists every product." };
+  if (path === "/") return { text: "They are on the home page, which lists every product." };
+  return { text: "They are on a page of the store." };
 }
 
 export function buildSystemPrompt(page: string) {

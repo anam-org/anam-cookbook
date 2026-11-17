@@ -125,12 +125,14 @@ export function listProducts() {
   return products.map(summary);
 }
 
+const STOPWORDS = new Set(["and", "any", "for", "have", "something", "the", "with", "you"]);
+
 export function searchProducts(query: string, maxPrice?: number) {
   // A naive keyword match, best matches first. Swap in your platform's search.
   const words = query
     .toLowerCase()
     .split(/\W+/)
-    .filter((word) => word.length > 2)
+    .filter((word) => word.length > 2 && !STOPWORDS.has(word))
     .map((word) => word.replace(/s$/, ""));
   return products
     .map((product) => {

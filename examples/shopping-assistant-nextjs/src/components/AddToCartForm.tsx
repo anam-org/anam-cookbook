@@ -8,20 +8,28 @@ export function AddToCartForm({ product }: { product: ProductDetails }) {
   const choices = product.options.filter((option) => option.values.length > 1);
   const [selected, setSelected] = useState(() => product.variants[0].options);
   const [message, setMessage] = useState("");
+  const [pending, setPending] = useState(false);
   const variant = product.variants.find(
     (candidate) => candidate.options.join() === selected.join(),
   );
 
   async function add() {
     if (!variant) return;
-    const response = await fetch("/api/cart/add", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ variantId: variant.id, quantity: 1 }),
-    });
-    const body = await response.json().catch(() => ({}));
-    setMessage(response.ok ? "Added to your cart." : body.error ?? "Couldn't add it.");
-    if (response.ok) window.dispatchEvent(new CustomEvent(CART_UPDATED));
+    setPending(true);
+    try {
+      const response = await fetch("/api/cart/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ variantId: variant.id, quantity: 1 }),
+      });
+      const body = await response.json().catch(() => ({}));
+      setMessage(response.ok ? "Added to your cart." : body.error ?? "Couldn't add it.");
+      if (response.ok) window.dispatchEvent(new CustomEvent(CART_UPDATED));
+    } catch {
+      setMessage("Couldn't add it. Check your connection and try again.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -48,7 +56,7 @@ export function AddToCartForm({ product }: { product: ProductDetails }) {
       <p className="text-lg">{variant?.price}</p>
       <button
         onClick={add}
-        disabled={!variant?.available}
+        disabled={!variant?.available || pending}
         className="rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-50"
       >
         {variant?.available ? "Add to cart" : "Sold out"}

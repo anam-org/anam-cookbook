@@ -1,24 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { CartSummary } from "@/lib/cart";
-import { CART_UPDATED } from "@/lib/shopping-tools";
+import { useCart } from "@/lib/use-cart";
 
 export default function CartPage() {
-  const [cart, setCart] = useState<CartSummary | null>(null);
+  const { cart, failed, retry } = useCart();
 
-  useEffect(() => {
-    const refresh = () =>
-      fetch("/api/cart")
-        .then((response) => response.json())
-        .then(setCart)
-        .catch(() => {});
-    refresh();
-    window.addEventListener(CART_UPDATED, refresh);
-    return () => window.removeEventListener(CART_UPDATED, refresh);
-  }, []);
-
-  if (!cart) return <p>Loading your cart…</p>;
+  if (!cart) {
+    if (!failed) return <p>Loading your cart…</p>;
+    return (
+      <p role="alert">
+        Couldn&apos;t load your cart.{" "}
+        <button onClick={retry} className="font-medium underline">
+          Try again
+        </button>
+      </p>
+    );
+  }
   if (cart.itemCount === 0) return <h1 className="text-2xl font-semibold">Your cart is empty</h1>;
 
   return (

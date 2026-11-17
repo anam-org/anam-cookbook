@@ -1,10 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { findVariant, formatPrice } from "@/lib/catalog";
 
-// The visitor's cart lives in a cookie, so the Add to cart button, the cart
-// page and the assistant all read and change the same cart.
+// The cart lives on the server under a random ID kept in a cookie, so the
+// Add to cart button, the cart page and the assistant all read and change the
+// same cart. The carts are in memory, so they're lost when the server
+// restarts. A real store uses its platform's cart instead.
 
-type Line = { variantId: number; quantity: number };
+export const MAX_QUANTITY = 20;
+const MAX_CARTS = 10_000;
+const COOKIE = "cart";
+
+/** Variant ID to quantity. */
+type Cart = Map<number, number>;
 
 export type CartSummary = {
   itemCount: number;
@@ -12,63 +20,75 @@ export type CartSummary = {
   items: { variantId: number; title: string; quantity: number; linePrice: string }[];
 };
 
-const COOKIE = "cart";
+/** The cart after an add, with the quantity the server actually added. */
+export type AddResult = CartSummary & { added: number };
 
-async function readLines(): Promise<Line[]> {
-  const raw = (await cookies()).get(COOKIE)?.value;
-  try {
-    const lines = JSON.parse(raw ?? "[]");
-    return Array.isArray(lines)
-      ? lines.filter((line) => findVariant(line.variantId) && line.quantity > 0)
-      : [];
-  } catch {
-    return [];
+// Kept on globalThis so every route, and Next.js dev reloads, share the carts.
+const shared = globalThis as typeof globalThis & { carts?: Map<string, Cart> };
+const carts = (shared.carts ??= new Map<string, Cart>());
+
+/** The visitor's cart. The cookie holds only an ID, so there's nothing in it to tamper with. */
+async function currentCart() {
+  const jar = await cookies();
+  let id = jar.get(COOKIE)?.value ?? "";
+  let cart = carts.get(id);
+  if (!cart) {
+    id = randomUUID();
+    cart = new Map();
+    jar.set(COOKIE, id, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 14,
+    });
   }
+  // Most recently used last, so the oldest cart goes when there are too many.
+  carts.delete(id);
+  carts.set(id, cart);
+  const oldest = carts.keys().next().value;
+  if (carts.size > MAX_CARTS && oldest) carts.delete(oldest);
+  return cart;
 }
 
-async function writeLines(lines: Line[]) {
-  (await cookies()).set(COOKIE, JSON.stringify(lines), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 14,
-  });
-}
-
+/** Creates the cart on the first visit, so it exists before the first add. */
 export async function getCart() {
-  return summarize(await readLines());
+  return summarize(await currentCart());
 }
 
-function summarize(lines: Line[]): CartSummary {
+function summarize(cart: Cart): CartSummary {
   let total = 0;
-  const items = lines.map((line) => {
-    const { product, variant } = findVariant(line.variantId)!;
-    total += variant.price * line.quantity;
+  let itemCount = 0;
+  const items = [...cart].map(([variantId, quantity]) => {
+    const { product, variant } = findVariant(variantId)!;
+    total += variant.price * quantity;
+    itemCount += quantity;
     const options = variant.options.join(" / ");
     return {
-      variantId: variant.id,
+      variantId,
       title: options === "Default Title" ? product.title : `${product.title} (${options})`,
-      quantity: line.quantity,
-      linePrice: formatPrice(variant.price * line.quantity),
+      quantity,
+      linePrice: formatPrice(variant.price * quantity),
     };
   });
-  return {
-    itemCount: lines.reduce((count, line) => count + line.quantity, 0),
-    total: formatPrice(total),
-    items,
-  };
+  return { itemCount, total: formatPrice(total), items };
 }
 
 export class CartError extends Error {}
 
-export async function addToCart(variantId: number, quantity: number) {
+/**
+ * Nothing awaits between reading the line and writing it back, so two adds
+ * at the same moment both count.
+ */
+export async function addToCart(variantId: number, quantity: number): Promise<AddResult> {
   const found = findVariant(variantId);
   if (!found) throw new CartError("Unknown variant.");
   if (!found.variant.available) throw new CartError("That option is sold out.");
-  const lines = await readLines();
-  const line = lines.find((candidate) => candidate.variantId === variantId);
-  if (line) line.quantity += quantity;
-  else lines.push({ variantId, quantity });
-  await writeLines(lines);
-  return summarize(lines);
+  const cart = await currentCart();
+  const newQuantity = (cart.get(variantId) ?? 0) + quantity;
+  if (newQuantity > MAX_QUANTITY) {
+    throw new CartError(`The cart can hold at most ${MAX_QUANTITY} of each item.`);
+  }
+  cart.set(variantId, newQuantity);
+  return { ...summarize(cart), added: quantity };
 }

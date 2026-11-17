@@ -1,5 +1,5 @@
 import type { AnamClient } from "@anam-ai/js-sdk";
-import type { CartSummary } from "@/lib/cart";
+import type { AddResult, CartSummary } from "@/lib/cart";
 import type { ProductDetails, ProductSummary } from "@/lib/catalog";
 
 // Browser-side handlers for the client tools in src/config/assistant.ts.
@@ -8,11 +8,21 @@ import type { ProductDetails, ProductSummary } from "@/lib/catalog";
 
 export const CART_UPDATED = "cart:updated";
 
-async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? `Request failed with ${response.status}`);
-  return body as T;
+/** The store answered with an error, so nothing changed. */
+class StoreError extends Error {}
+
+async function getJson<T>(url: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
+  // Stop when the call ends, or after 6 seconds. That's inside the tools'
+  // 8-second timeout, so the persona always hears what happened.
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.any([signal, AbortSignal.timeout(6_000)]),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new StoreError(body.error ?? `Request failed with ${response.status}`);
+  }
+  return response.json();
 }
 
 /** The product handle in the address bar, when the shopper is on a product page. */
@@ -42,21 +52,35 @@ function pickVariant(product: ProductDetails, wanted: Record<string, string>) {
   return { variant };
 }
 
+/**
+ * `signal` is aborted when the call ends. Every request uses it, so a handler
+ * that's still running can't change the cart or the cards after that.
+ */
 export function registerShoppingTools(
   client: AnamClient,
   ui: { showProducts(products: ProductSummary[]): void },
+  signal: AbortSignal,
 ) {
+  let latestSearch = 0;
+
   const stops = [
     client.registerToolCallHandler("search_products", {
       onStart: async ({ arguments: args }) => {
+        const search = ++latestSearch;
         const params = new URLSearchParams({ q: String(args.query ?? "") });
         if (args.max_price) params.set("max_price", String(args.max_price));
-        const { products } = await getJson<{ products: ProductSummary[] }>(`/api/products?${params}`);
+        const { products } = await getJson<{ products: ProductSummary[] }>(
+          `/api/products?${params}`,
+          signal,
+        );
+        // A slow older search mustn't replace the cards from a newer one.
+        if (search !== latestSearch) return "A newer search replaced these results.";
         const shown = products.slice(0, 3);
+        // Clear the old cards too when nothing matches.
+        ui.showProducts(shown);
         if (shown.length === 0) {
           return `No products match "${args.query}". Try a broader word, or ask what they need it for.`;
         }
-        ui.showProducts(shown);
         return [
           `${shown.length} shown as cards beside you:`,
           ...shown.map(
@@ -71,14 +95,21 @@ export function registerShoppingTools(
       onStart: async ({ arguments: args }) => {
         const handle = String(args.handle || productOnScreen());
         if (!handle) return "Error: handle is required. Search for the product first.";
-        const product = await getJson<ProductDetails>(`/api/products/${encodeURIComponent(handle)}`);
+        const product = await getJson<ProductDetails>(
+          `/api/products/${encodeURIComponent(handle)}`,
+          signal,
+        );
         const soldOut = product.variants.filter((variant) => !variant.available);
+        const prices = new Set(product.variants.map((variant) => variant.price));
         return [
           `${product.title}: from ${product.price}.`,
           product.available ? "In stock." : "SOLD OUT in every option.",
           ...product.options
             .filter((option) => option.name !== "Title")
             .map((option) => `${option.name}: ${option.values.join(", ")}`),
+          prices.size > 1
+            ? `Prices: ${product.variants.map((variant) => `${variant.title} ${variant.price}`).join("; ")}`
+            : "",
           soldOut.length > 0 && product.available
             ? `Sold out: ${soldOut.map((variant) => variant.title).join("; ")}`
             : "",
@@ -93,7 +124,10 @@ export function registerShoppingTools(
       onStart: async ({ arguments: args }) => {
         const handle = String(args.handle || productOnScreen());
         if (!handle) return "Error: handle is required.";
-        const product = await getJson<ProductDetails>(`/api/products/${encodeURIComponent(handle)}`);
+        const product = await getJson<ProductDetails>(
+          `/api/products/${encodeURIComponent(handle)}`,
+          signal,
+        );
         const { variant, missing } = pickVariant(product, args.options ?? {});
         if (missing) {
           return `Not added. Ask which ${missing
@@ -107,22 +141,29 @@ export function registerShoppingTools(
             others.map((candidate) => candidate.title).join("; ") || "none"
           }.`;
         }
-        const quantity = Number(args.quantity) > 0 ? Math.round(Number(args.quantity)) : 1;
-        const cart = await getJson<CartSummary>("/api/cart/add", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ variantId: variant.id, quantity }),
-        });
+        let cart: AddResult;
+        try {
+          // The server checks the quantity and says how many it added.
+          cart = await getJson<AddResult>("/api/cart/add", signal, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ variantId: variant.id, quantity: args.quantity ?? 1 }),
+          });
+        } catch (error) {
+          if (error instanceof StoreError) throw error;
+          // A timeout or network error: the add may still have gone through.
+          return "Not sure it was added: the store didn't answer. Call get_cart to check before adding it again.";
+        }
         // Tells the header's cart count to refresh.
         window.dispatchEvent(new CustomEvent(CART_UPDATED));
         const options = variant.title === "Default Title" ? "" : ` (${variant.title})`;
-        return `Added ${quantity} × ${product.title}${options}, ${variant.price} each. The cart now has ${cart.itemCount} items, ${cart.total} in total.`;
+        return `Added ${cart.added} × ${product.title}${options}, ${variant.price} each. The cart now has ${cart.itemCount} items, ${cart.total} in total.`;
       },
     }),
 
     client.registerToolCallHandler("get_cart", {
       onStart: async () => {
-        const cart = await getJson<CartSummary>("/api/cart");
+        const cart = await getJson<CartSummary>("/api/cart", signal);
         if (cart.itemCount === 0) return "The cart is empty.";
         return [
           `${cart.itemCount} items, ${cart.total} in total:`,

@@ -15,7 +15,8 @@ async function fetchSessionToken(signal: AbortSignal): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: location.pathname }),
-    signal,
+    // Give up after 20 seconds, or as soon as the shopper cancels.
+    signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || typeof data.sessionToken !== "string") {
@@ -55,12 +56,15 @@ export function AssistantDock() {
     setError(null);
     setProducts([]);
     try {
+      const startPath = location.pathname;
       const token = await fetchSessionToken(attempt.signal);
       if (attempt.signal.aborted) return;
       client = createClient(token);
       clientRef.current = client;
 
-      stopTools = registerShoppingTools(client, { showProducts: setProducts });
+      // Ending the call aborts attempt.signal, which stops any tool work
+      // that's still running.
+      stopTools = registerShoppingTools(client, { showProducts: setProducts }, attempt.signal);
 
       // Context sent before the persona is ready is dropped, so page changes
       // are only sent once the greeting has started.
@@ -68,6 +72,11 @@ export function AssistantDock() {
         if (attempt.signal.aborted || event.role !== MessageRole.PERSONA) return;
         readyRef.current = true;
         client?.removeListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onGreeting);
+        // The prompt describes the page the call started on. If the shopper
+        // has moved on since, say where they are now.
+        if (location.pathname !== startPath) {
+          client?.addContext(`[visitor opened ${location.pathname}]`);
+        }
       };
       client.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onGreeting);
       client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () => {
@@ -88,7 +97,10 @@ export function AssistantDock() {
     } catch (err) {
       if (attempt.signal.aborted) return;
       cleanup();
-      setError(err instanceof Error ? err.message : "The assistant is unavailable right now.");
+      const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+      setError(
+        !timedOut && err instanceof Error ? err.message : "The assistant is unavailable right now.",
+      );
       setStatus("error");
     }
   }
@@ -174,18 +186,17 @@ export function AssistantDock() {
             </button>
           </form>
         )}
-        {status === "connected" ? (
+        {status === "connected" || status === "connecting" ? (
           <button
             onClick={stop}
             className="w-full rounded-lg bg-stone-100 px-3 py-2 text-sm font-medium text-stone-900 hover:bg-stone-200"
           >
-            End call
+            {status === "connecting" ? "Cancel" : "End call"}
           </button>
         ) : (
           <button
             onClick={start}
-            disabled={status === "connecting"}
-            className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60"
+            className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800"
           >
             {status === "error" ? "Try again" : "Talk to Mia"}
           </button>
