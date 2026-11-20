@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  createStartTicket,
   isSameOrigin,
   readServerConfig,
   redeemStartTicket,
@@ -36,13 +35,10 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   if (!redeemStartTicket(body?.ticket)) {
     return NextResponse.json(
-      { error: "This page has expired. Reload it to start a conversation." },
+      { error: "Couldn't verify this request. Try again." },
       { status: 401 }
     );
   }
-
-  // The ticket is spent, so send a new one for the next conversation.
-  const nextTicket = createStartTicket();
 
   try {
     // Fetch the ElevenLabs signed URL.
@@ -58,7 +54,7 @@ export async function POST(request: Request) {
     if (!elRes.ok) {
       console.error("ElevenLabs API error:", elRes.status, await elRes.text());
       return NextResponse.json(
-        { error: "Couldn't connect to the ElevenLabs agent.", nextTicket },
+        { error: "Couldn't connect to the ElevenLabs agent." },
         { status: 502 }
       );
     }
@@ -100,17 +96,17 @@ export async function POST(request: Request) {
     if (!anamRes.ok) {
       console.error("Anam API error:", anamRes.status, await anamRes.text());
       return NextResponse.json(
-        { error: "Couldn't create the Anam session.", nextTicket },
+        { error: "Couldn't create the Anam session." },
         { status: 502 }
       );
     }
 
     const data = await anamRes.json();
-    return NextResponse.json({ sessionToken: data.sessionToken, nextTicket });
+    return NextResponse.json({ sessionToken: data.sessionToken });
   } catch (error) {
     console.error("Session setup failed:", error);
     return NextResponse.json(
-      { error: "Couldn't start the session. Try again.", nextTicket },
+      { error: "Couldn't start the session. Try again." },
       { status: 502 }
     );
   }

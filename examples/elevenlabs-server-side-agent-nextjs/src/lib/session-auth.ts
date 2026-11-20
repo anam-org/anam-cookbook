@@ -2,14 +2,15 @@
 // from a client component: it reads SESSION_SECRET.
 //
 // The route accepts a request only when it comes from this site (same-origin
-// check) and carries a start ticket that the page signed with SESSION_SECRET.
+// check) and carries a start ticket signed with SESSION_SECRET. The browser
+// gets a fresh ticket from a server action just before each start.
 // Without them, any website or script could call the route and start sessions
 // on your Anam and ElevenLabs accounts. This isn't user authentication: in a
 // real app, also check your own user session in the route and rate-limit it.
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-const TICKET_TTL_MS = 15 * 60 * 1000;
+const TICKET_TTL_MS = 2 * 60 * 1000;
 
 // Redeemed ticket nonces, so each ticket starts one conversation. The map
 // lives in memory, so it resets on restart and isn't shared between server
@@ -67,15 +68,20 @@ export function isSameOrigin(request: Request) {
   if (fetchSite && fetchSite !== "same-origin") return false;
 
   const origin = request.headers.get("origin");
-  const host =
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (!origin || !host) return false;
+  return origin !== null && origin === expectedOrigin(request);
+}
 
-  try {
-    return new URL(origin).host === host;
-  } catch {
-    return false;
-  }
+// The site's own origin, including the scheme. Set APP_ORIGIN (for example
+// https://example.com) if a proxy in front of the app changes the Host header.
+function expectedOrigin(request: Request) {
+  if (process.env.APP_ORIGIN) return new URL(process.env.APP_ORIGIN).origin;
+
+  const host = request.headers.get("host");
+  if (!host) return null;
+  const protocol =
+    request.headers.get("x-forwarded-proto")?.split(",")[0].trim() ||
+    new URL(request.url).protocol.replace(":", "");
+  return `${protocol}://${host}`;
 }
 
 /** Reads the server-only settings. Returns null if any are missing. */

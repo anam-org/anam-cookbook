@@ -20,7 +20,7 @@ Client (Anam JS SDK) ──WebRTC──▶ Anam ◀──WebSocket──▶ Elev
 
 ## How it works
 
-1. The page renders with a short-lived **start ticket** signed with `SESSION_SECRET`. The Next.js API route (`/api/anam-session`) accepts a request only from the same origin and with a valid, unused ticket. It then fetches an ElevenLabs **signed URL** using your API key and requests an Anam **session token** with `elevenLabsAgentSettings` attached. The avatar and agent IDs come from server environment variables and never reach the browser.
+1. When you click Start, the browser asks for the microphone and gets a single-use **start ticket** from a server action, signed with `SESSION_SECRET`. The Next.js API route (`/api/anam-session`) accepts a request only from the same origin and with a valid, unused ticket. It then fetches an ElevenLabs **signed URL** using your API key and requests an Anam **session token** with `elevenLabsAgentSettings` attached. The avatar and agent IDs come from server environment variables and never reach the browser.
 2. The session token selects the Cara 4 avatar model and gives Director Notes a warm baseline style.
 3. Anam uses the signed URL to open a WebSocket to ElevenLabs and manages the full voice pipeline.
 4. Supported v3 tags in the agent response are mapped to Director Notes cues, so the face follows the voice's delivery.
@@ -125,6 +125,7 @@ Fill in the keys for one avatar-agent pair:
 | `ELEVENLABS_AGENT_ID` | elevenlabs.io → Agents dashboard |
 | `SESSION_SECRET` | 32+ random characters: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `PERSONA_NAME` | Optional label shown before the session starts |
+| `APP_ORIGIN` | Optional: your public origin, such as `https://example.com`, if a proxy changes the `Host` header |
 
 None of these use the `NEXT_PUBLIC_` prefix, so they stay on the server.
 
@@ -132,13 +133,13 @@ None of these use the `NEXT_PUBLIC_` prefix, so they stay on the server.
 
 Every session uses minutes on your Anam account and your ElevenLabs agent, so `/api/anam-session` doesn't accept calls from anywhere:
 
-- It rejects requests that a browser sent from another site (same-origin check).
-- It requires a start ticket that the page signed with `SESSION_SECRET`. Tickets expire after 15 minutes and work once; the route returns a new one with each response.
-- The session token it returns can start one session and expires after 5 minutes.
+- It rejects requests that a browser sent from another site. The request's `Origin`, including scheme and port, must match the site.
+- It requires a start ticket signed with `SESSION_SECRET`. The browser gets one from a server action (`src/app/actions.ts`) just before each start; tickets work once, within two minutes.
+- The session token it returns allows 3 session starts (the SDK's retries) and expires after 5 minutes.
 
-The checks live in `src/lib/session-auth.ts`. Used tickets are tracked in memory, so if you deploy several instances, move that record to Redis or your database. These checks stop other sites and casual scripts, but they aren't user authentication: in a real app, check your own user session in the route and add rate limits.
+The checks live in `src/lib/session-auth.ts`. Used tickets are tracked in memory, so if you deploy several instances, move that record to Redis or your database. These checks stop other websites from using the route from their visitors' browsers. They aren't user authentication and don't stop someone who scripts requests against your site: in a real app, check your own user session in the route and add rate limits.
 
-The client component removes its event listeners and tool handlers, cancels a start in progress, and calls `stopStreaming()` when the conversation ends or the component unmounts.
+The client component requests the microphone itself, so it can release a permission grant that arrives late. It removes its event listeners and tool handlers, cancels a start in progress, and calls `stopStreaming()` when the conversation ends, the connection closes, or the component unmounts. It shows the session as connected only once WebRTC connects, and shows an error if the connection closes abnormally.
 
 ### Run locally
 

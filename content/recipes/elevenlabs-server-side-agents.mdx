@@ -12,7 +12,7 @@ authors: [robbie-anam]
 
 Anam's server-side ElevenLabs integration connects an Anam avatar to an ElevenLabs Conversational AI agent. Your server fetches a short-lived ElevenLabs signed URL and includes it when creating an Anam session token.
 
-The browser uses the Anam JavaScript SDK to start the WebRTC session and render the avatar. Anam sends conversation audio to ElevenLabs, receives the generated speech, and keeps the avatar in sync. API keys and agent IDs stay on the server, the route only accepts requests from your own page, and completed sessions include recordings and transcripts in Anam Lab.
+The browser uses the Anam JavaScript SDK to start the WebRTC session and render the avatar. Anam sends conversation audio to ElevenLabs, receives the generated speech, and keeps the avatar in sync. API keys and agent IDs stay on the server, the route rejects requests from other sites, and completed sessions include recordings and transcripts in Anam Lab.
 
 The complete example code is available at [examples/elevenlabs-server-side-agent-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/elevenlabs-server-side-agent-nextjs).
 
@@ -36,7 +36,7 @@ The session is split between your Next.js server, the browser, and Anam's engine
 
 ```
 Server:
-  1. Render the page with a signed start ticket
+  1. Sign a single-use start ticket (server action)
   2. Check the request's origin and redeem the ticket
   3. Fetch signed URL from ElevenLabs API
   4. Create Anam session token with Cara 4 Director Notes
@@ -65,7 +65,7 @@ The Next.js route supplies the ElevenLabs settings when it creates the session t
 
 ## Server-side setup
 
-You need one API route. It checks that the request came from your own page, fetches a signed URL from ElevenLabs, then passes it to Anam when creating a session token.
+You need one API route. It checks that the request came from your own site, fetches a signed URL from ElevenLabs, then passes it to Anam when creating a session token.
 
 API keys and IDs stay server-side. The route reads the avatar ID (which face to render) and the ElevenLabs agent ID from environment variables, so a caller can't point your keys at a different agent or avatar.
 
@@ -79,6 +79,8 @@ ELEVENLABS_AGENT_ID=your_elevenlabs_agent_id
 # 32+ random characters. Generate one with:
 # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 SESSION_SECRET=your_random_secret
+# Optional: your public origin, if a proxy changes the Host header
+# APP_ORIGIN=https://example.com
 ```
 
 None of these use the `NEXT_PUBLIC_` prefix, so Next.js never sends them to the browser.
@@ -88,16 +90,16 @@ None of these use the `NEXT_PUBLIC_` prefix, so Next.js never sends them to the 
 Every session uses minutes on your Anam account and your ElevenLabs agent. Without a check, any website or script could call the route and start sessions on your keys. These helpers add two checks:
 
 - **Same origin.** The route rejects requests that a browser sent from another site.
-- **Start ticket.** Your page signs a short-lived ticket with `SESSION_SECRET`, which never leaves the server. The route accepts each ticket once and returns a new one for the next conversation.
+- **Start ticket.** Just before each start, a server action signs a ticket with `SESSION_SECRET`, which never leaves the server. The route accepts each ticket once, within two minutes.
 
-This isn't user authentication. In a real app, also check your own user session in the route and rate-limit it.
+These checks stop other websites from using your route from a visitor's browser. They aren't user authentication and don't stop someone who scripts requests against your site. In a real app, also check your own user session in the route and rate-limit it.
 
 ```typescript
 // lib/session-auth.ts
 // Server only: don't import this file from a client component.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-const TICKET_TTL_MS = 15 * 60 * 1000;
+const TICKET_TTL_MS = 2 * 60 * 1000;
 
 // Redeemed ticket nonces, so each ticket starts one conversation. The map
 // lives in memory, so it resets on restart and isn't shared between server
@@ -155,15 +157,20 @@ export function isSameOrigin(request: Request) {
   if (fetchSite && fetchSite !== "same-origin") return false;
 
   const origin = request.headers.get("origin");
-  const host =
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (!origin || !host) return false;
+  return origin !== null && origin === expectedOrigin(request);
+}
 
-  try {
-    return new URL(origin).host === host;
-  } catch {
-    return false;
-  }
+// The site's own origin, including the scheme. Set APP_ORIGIN (for example
+// https://example.com) if a proxy in front of the app changes the Host header.
+function expectedOrigin(request: Request) {
+  if (process.env.APP_ORIGIN) return new URL(process.env.APP_ORIGIN).origin;
+
+  const host = request.headers.get("host");
+  if (!host) return null;
+  const protocol =
+    request.headers.get("x-forwarded-proto")?.split(",")[0].trim() ||
+    new URL(request.url).protocol.replace(":", "");
+  return `${protocol}://${host}`;
 }
 
 /** Reads the server-only settings. Returns null if any are missing. */
@@ -187,7 +194,6 @@ export function readServerConfig() {
 // app/api/anam-session/route.ts
 import { NextResponse } from "next/server";
 import {
-  createStartTicket,
   isSameOrigin,
   readServerConfig,
   redeemStartTicket,
@@ -223,13 +229,10 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   if (!redeemStartTicket(body?.ticket)) {
     return NextResponse.json(
-      { error: "This page has expired. Reload it to start a conversation." },
+      { error: "Couldn't verify this request. Try again." },
       { status: 401 }
     );
   }
-
-  // The ticket is spent, so send a new one for the next conversation.
-  const nextTicket = createStartTicket();
 
   try {
     // Fetch the ElevenLabs signed URL.
@@ -245,7 +248,7 @@ export async function POST(request: Request) {
     if (!elRes.ok) {
       console.error("ElevenLabs API error:", elRes.status, await elRes.text());
       return NextResponse.json(
-        { error: "Couldn't connect to the ElevenLabs agent.", nextTicket },
+        { error: "Couldn't connect to the ElevenLabs agent." },
         { status: 502 }
       );
     }
@@ -287,17 +290,17 @@ export async function POST(request: Request) {
     if (!anamRes.ok) {
       console.error("Anam API error:", anamRes.status, await anamRes.text());
       return NextResponse.json(
-        { error: "Couldn't create the Anam session.", nextTicket },
+        { error: "Couldn't create the Anam session." },
         { status: 502 }
       );
     }
 
     const data = await anamRes.json();
-    return NextResponse.json({ sessionToken: data.sessionToken, nextTicket });
+    return NextResponse.json({ sessionToken: data.sessionToken });
   } catch (error) {
     console.error("Session setup failed:", error);
     return NextResponse.json(
-      { error: "Couldn't start the session. Try again.", nextTicket },
+      { error: "Couldn't start the session. Try again." },
       { status: 502 }
     );
   }
@@ -469,54 +472,60 @@ See [ElevenLabs custom LLM docs](https://elevenlabs.io/docs/eleven-agents/custom
 
 ## Start the avatar session
 
-Create a page that signs a start ticket and passes it to your client component. `await connection()` makes Next.js render the page on every request, so each visitor gets a fresh ticket instead of one baked in at build time:
+Add a server action that signs a start ticket. The browser calls it just before each start, so the ticket is always fresh:
 
 ```typescript
-// app/page.tsx
-import { connection } from "next/server";
+// app/actions.ts
+"use server";
+
 import { createStartTicket } from "@/lib/session-auth";
-import AvatarChat from "./AvatarChat";
 
-export default async function Page() {
-  // Render per request, so every visitor gets a fresh ticket
-  await connection();
-
-  return <AvatarChat startTicket={createStartTicket()} />;
+// Next.js only runs server actions for same-origin requests
+export async function getStartTicket() {
+  return createStartTicket();
 }
 ```
 
-In the browser, send the ticket to your route, create an Anam client with the session token, and attach its stream to your video element:
+In the browser, get a ticket, send it to your route, create an Anam client with the session token, and attach its stream to your video element:
 
 ```typescript
 import { createClient } from "@anam-ai/js-sdk";
+import { getStartTicket } from "./actions";
 
+const ticket = await getStartTicket();
 const res = await fetch("/api/anam-session", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ ticket }),
 });
-const { sessionToken, nextTicket } = await res.json();
+const { sessionToken } = await res.json();
 
 const client = createClient(sessionToken);
 await client.streamToVideoElement("avatar-video");
 ```
 
-`streamToVideoElement()` starts microphone capture and renders the avatar's video and audio in the element with the matching ID. Each ticket works once, so keep `nextTicket` for the next conversation.
+`streamToVideoElement()` starts microphone capture and renders the avatar's video and audio in the element with the matching ID.
 
 ### Working component example
 
-Below is a React component with connection lifecycle and a streaming transcript.
+Below is a React component with connection lifecycle and a streaming transcript. Render it from any page, such as `app/page.tsx`.
 
 The `MESSAGE_STREAM_EVENT_RECEIVED` event fires for each chunk of text from both the user and the agent. Accumulate chunks by message ID to build the full transcript.
 
-The component also cleans up after itself. When the session ends or the component unmounts, it removes its event listeners and calls `stopStreaming()`, so the session and the microphone don't outlive the page. If it unmounts while still connecting, it ends the new session as soon as it opens.
+The component also cleans up after itself. When the session ends, the connection closes, or the component unmounts, it removes its event listeners and calls `stopStreaming()`, so the session and the microphone don't outlive the page. If it unmounts while still connecting, it ends the new session as soon as it opens.
 
 ```typescript
 // app/AvatarChat.tsx
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AnamEvent, createClient, type AnamClient } from "@anam-ai/js-sdk";
+import {
+  AnamEvent,
+  ConnectionClosedCode,
+  createClient,
+  type AnamClient,
+} from "@anam-ai/js-sdk";
+import { getStartTicket } from "./actions";
 
 type Message = {
   id: string;
@@ -525,15 +534,15 @@ type Message = {
   interrupted?: boolean;
 };
 
-export default function AvatarChat({ startTicket }: { startTicket: string }) {
+export default function AvatarChat() {
   const clientRef = useRef<AnamClient | null>(null);
-  const ticketRef = useRef(startTicket);
-  // Undo functions for the session's event listeners
+  // Undo functions for the session's microphone and event listeners
   const cleanupRef = useRef<Array<() => void>>([]);
   // Bumped on every teardown, so a start() still in progress gives up
   const attemptRef = useRef(0);
   const [status, setStatus] = useState<"idle" | "connecting" | "connected">("idle");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   // Remove the listeners, end the session, and cancel a start in progress
   const release = useCallback(() => {
@@ -553,20 +562,30 @@ export default function AvatarChat({ startTicket }: { startTicket: string }) {
     const attempt = attemptRef.current;
     setStatus("connecting");
     setMessages([]);
+    setError(null);
 
     try {
+      // Ask for the microphone here, so a permission grant that arrives
+      // after Stop or unmount can still be released
+      const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true },
+      });
+      const stopMic = () => micStream.getTracks().forEach((t) => t.stop());
+      if (attempt !== attemptRef.current) return stopMic();
+      cleanupRef.current.push(stopMic);
+
+      // Get a fresh, single-use ticket from the server action
+      const ticket = await getStartTicket();
       const res = await fetch("/api/anam-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket: ticketRef.current }),
+        body: JSON.stringify({ ticket }),
       });
-      const body = await res.json();
-      // Each ticket works once; keep the new one for the next start
-      if (body.nextTicket) ticketRef.current = body.nextTicket;
+      const body = await res.json().catch(() => ({}));
+      if (attempt !== attemptRef.current) return;
       if (!res.ok) {
         throw new Error(body.error ?? "Failed to create a session token");
       }
-      if (attempt !== attemptRef.current) return;
 
       const anamClient = createClient(body.sessionToken);
       clientRef.current = anamClient;
@@ -601,31 +620,40 @@ export default function AvatarChat({ startTicket }: { startTicket: string }) {
         });
       };
 
-      const onClosed = () => {
+      // streamToVideoElement() resolves once signalling starts; the session
+      // is connected when WebRTC is
+      const onConnected = () => setStatus("connected");
+
+      const onClosed = (reason: ConnectionClosedCode, details?: string) => {
         if (clientRef.current !== anamClient) return;
-        clientRef.current = null; // already closed, so don't stop it again
+        // Some failures close the connection but keep the microphone open,
+        // so always stop the client
         release();
+        if (reason !== ConnectionClosedCode.NORMAL) {
+          setError(details || `The session ended unexpectedly (${reason})`);
+        }
         setStatus("idle");
       };
 
       anamClient.addListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onMessage);
+      anamClient.addListener(AnamEvent.CONNECTION_ESTABLISHED, onConnected);
       anamClient.addListener(AnamEvent.CONNECTION_CLOSED, onClosed);
       cleanupRef.current.push(
         () => anamClient.removeListener(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, onMessage),
+        () => anamClient.removeListener(AnamEvent.CONNECTION_ESTABLISHED, onConnected),
         () => anamClient.removeListener(AnamEvent.CONNECTION_CLOSED, onClosed)
       );
 
-      await anamClient.streamToVideoElement("avatar-video");
+      await anamClient.streamToVideoElement("avatar-video", micStream);
       if (attempt !== attemptRef.current) {
         // Stopped or unmounted while connecting: end the new session
         void anamClient.stopStreaming().catch(() => {});
-        return;
       }
-      setStatus("connected");
     } catch (error) {
       if (attempt !== attemptRef.current) return;
       console.error("Failed to start the avatar session:", error);
       release();
+      setError(error instanceof Error ? error.message : "Failed to start");
       setStatus("idle");
     }
   }, [release]);
@@ -644,6 +672,7 @@ export default function AvatarChat({ startTicket }: { startTicket: string }) {
       >
         {status === "connected" ? "Stop" : "Start"}
       </button>
+      {error && <p role="alert">{error}</p>}
       <ul>
         {messages.map((message) => (
           <li key={message.id}>
@@ -715,10 +744,11 @@ The ElevenLabs connection and API keys remain server-side when client tools are 
 ## Troubleshooting
 
 **"Start the conversation from this site." (403)**
-- The route only accepts requests from a page on the same origin. Call it from your own page, not from another site, a different port, or a script
+- The route only accepts browser requests from a page on the same origin, including the scheme and port. Call it from your own site
+- If a proxy in front of your app changes the `Host` header, set `APP_ORIGIN` to your public origin, such as `https://example.com`
 
-**"This page has expired. Reload it to start a conversation." (401)**
-- Start tickets expire after 15 minutes and work once. Reload the page to get a new one
+**"Couldn't verify this request. Try again." (401)**
+- Each start gets a new ticket that works once, within two minutes. Click Start again
 - Check that `SESSION_SECRET` is set, at least 32 characters, and the same on every server instance
 - If you run several instances, keep redeemed tickets in a shared store such as Redis
 

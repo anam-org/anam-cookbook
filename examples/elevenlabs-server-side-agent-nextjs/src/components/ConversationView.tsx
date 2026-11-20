@@ -11,10 +11,12 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import {
   AnamEvent,
+  ConnectionClosedCode,
   createClient,
   type AnamClient,
   type EventCallbacks,
 } from "@anam-ai/js-sdk";
+import { getStartTicket } from "@/app/actions";
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
@@ -54,10 +56,10 @@ function readRequiredString(
 
 export default function ConversationView({
   personaName,
-  startTicket,
+  isConfigured,
 }: {
   personaName: string;
-  startTicket: string | null;
+  isConfigured: boolean;
 }) {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -67,13 +69,8 @@ export default function ConversationView({
   const [directorNoteActivity, setDirectorNoteActivity] =
     useState<DirectorNoteActivity | null>(null);
 
-  const isConfigured = startTicket !== null;
-
   const anamClientRef = useRef<AnamClient | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
-  // The signed ticket for the next conversation. The server spends one per
-  // start and sends back a fresh one.
-  const ticketRef = useRef(startTicket);
   // Undo functions for everything a session registers: tool handlers and
   // event listeners.
   const disposersRef = useRef<Array<() => void>>([]);
@@ -142,16 +139,32 @@ export default function ConversationView({
     setDirectorNoteActivity(null);
 
     try {
+      // Ask for the microphone here rather than inside the SDK, so a
+      // permission grant that arrives after Stop or unmount is released.
+      const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true },
+      });
+      const stopMic = () => micStream.getTracks().forEach((t) => t.stop());
+      if (!isCurrent()) {
+        stopMic();
+        return;
+      }
+      disposersRef.current.push(stopMic);
+
+      // A fresh, single-use ticket proves the request comes from this site.
+      const ticket = await getStartTicket();
+      if (!isCurrent()) return;
+      if (!ticket) {
+        throw new Error("The server is missing settings. See .env.example.");
+      }
+
       const res = await fetch("/api/anam-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket: ticketRef.current }),
+        body: JSON.stringify({ ticket }),
         signal: abortController.signal,
       });
       const body = await res.json().catch(() => ({}));
-      if (typeof body.nextTicket === "string") {
-        ticketRef.current = body.nextTicket;
-      }
       if (!isCurrent()) return;
 
       if (!res.ok || typeof body.sessionToken !== "string") {
@@ -260,29 +273,31 @@ export default function ConversationView({
         });
       });
 
-      let connected = false;
-      listen(AnamEvent.CONNECTION_CLOSED, (_reason, details) => {
+      // streamToVideoElement() resolves once signalling starts, so wait for
+      // the WebRTC connection before showing the session as connected.
+      listen(AnamEvent.CONNECTION_ESTABLISHED, () => {
+        setStatus("connected");
+      });
+
+      listen(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
         if (anamClientRef.current !== anamClient) return;
-        // The session has already ended, so release it without stopping it.
-        anamClientRef.current = null;
+        // Some failures close the connection without releasing the
+        // microphone, so always stop the client.
         releaseSession();
-        if (connected) {
+        if (reason === ConnectionClosedCode.NORMAL) {
           setStatus("idle");
         } else {
-          setError(details || "The connection closed before the session started.");
+          setError(details || `The session ended unexpectedly (${reason}).`);
           setStatus("error");
         }
       });
 
-      await anamClient.streamToVideoElement("avatar-video");
+      await anamClient.streamToVideoElement("avatar-video", micStream);
       if (!isCurrent()) {
         // Stopped or unmounted while connecting: end the session we just
         // opened.
         void anamClient.stopStreaming().catch(() => {});
-        return;
       }
-      connected = true;
-      setStatus("connected");
     } catch (err) {
       if (!isCurrent()) return;
       console.error("Start error:", err);
