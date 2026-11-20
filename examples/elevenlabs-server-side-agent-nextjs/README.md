@@ -20,7 +20,7 @@ Client (Anam JS SDK) ──WebRTC──▶ Anam ◀──WebSocket──▶ Elev
 
 ## How it works
 
-1. The Next.js API route (`/api/anam-session`) fetches an ElevenLabs **signed URL** using your API key, then requests an Anam **session token** with `elevenLabsAgentSettings` attached.
+1. The page renders with a short-lived **start ticket** signed with `SESSION_SECRET`. The Next.js API route (`/api/anam-session`) accepts a request only from the same origin and with a valid, unused ticket. It then fetches an ElevenLabs **signed URL** using your API key and requests an Anam **session token** with `elevenLabsAgentSettings` attached. The avatar and agent IDs come from server environment variables and never reach the browser.
 2. The session token selects the Cara 4 avatar model and gives Director Notes a warm baseline style.
 3. Anam uses the signed URL to open a WebSocket to ElevenLabs and manages the full voice pipeline.
 4. Supported v3 tags in the agent response are mapped to Director Notes cues, so the face follows the voice's delivery.
@@ -123,7 +123,22 @@ Fill in the keys for one avatar-agent pair:
 | `ANAM_AVATAR_ID` | lab.anam.ai → Avatars (must be Cara 4) |
 | `ELEVENLABS_API_KEY` | elevenlabs.io → API Keys |
 | `ELEVENLABS_AGENT_ID` | elevenlabs.io → Agents dashboard |
+| `SESSION_SECRET` | 32+ random characters: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `PERSONA_NAME` | Optional label shown before the session starts |
+
+None of these use the `NEXT_PUBLIC_` prefix, so they stay on the server.
+
+### Protecting the session route
+
+Every session uses minutes on your Anam account and your ElevenLabs agent, so `/api/anam-session` doesn't accept calls from anywhere:
+
+- It rejects requests that a browser sent from another site (same-origin check).
+- It requires a start ticket that the page signed with `SESSION_SECRET`. Tickets expire after 15 minutes and work once; the route returns a new one with each response.
+- The session token it returns can start one session and expires after 5 minutes.
+
+The checks live in `src/lib/session-auth.ts`. Used tickets are tracked in memory, so if you deploy several instances, move that record to Redis or your database. These checks stop other sites and casual scripts, but they aren't user authentication: in a real app, check your own user session in the route and add rate limits.
+
+The client component removes its event listeners and tool handlers, cancels a start in progress, and calls `stopStreaming()` when the conversation ends or the component unmounts.
 
 ### Run locally
 

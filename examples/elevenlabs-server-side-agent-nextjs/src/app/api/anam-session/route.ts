@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import {
+  createStartTicket,
+  isSameOrigin,
+  readServerConfig,
+  redeemStartTicket,
+} from "@/lib/session-auth";
 
 /**
  * Creates an Anam session token with ElevenLabs agent settings.
@@ -7,92 +13,105 @@ import { NextResponse } from "next/server";
  * the Anam session token API via environment.elevenLabsAgentSettings.
  * Anam handles the ElevenLabs connection, while the client only
  * streams the avatar.
+ *
+ * The avatar and agent IDs come from server environment variables, not
+ * from the request, so a caller can't point your API keys at other agents.
  */
 export async function POST(request: Request) {
-  const anamApiKey = process.env.ANAM_API_KEY;
-  if (!anamApiKey) {
+  if (!isSameOrigin(request)) {
     return NextResponse.json(
-      { error: "ANAM_API_KEY must be set" },
+      { error: "Start the conversation from this site." },
+      { status: 403 }
+    );
+  }
+
+  const config = readServerConfig();
+  if (!config) {
+    return NextResponse.json(
+      { error: "The server is missing settings. See .env.example." },
       { status: 500 }
     );
   }
 
-  const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
-  if (!elevenLabsApiKey) {
+  const body = await request.json().catch(() => null);
+  if (!redeemStartTicket(body?.ticket)) {
     return NextResponse.json(
-      { error: "ELEVENLABS_API_KEY must be set" },
-      { status: 500 }
+      { error: "This page has expired. Reload it to start a conversation." },
+      { status: 401 }
     );
   }
 
-  const body = await request.json().catch(() => ({}));
-  const { avatarId, agentId } = body;
+  // The ticket is spent, so send a new one for the next conversation.
+  const nextTicket = createStartTicket();
 
-  if (!avatarId) {
-    return NextResponse.json(
-      { error: "avatarId is required" },
-      { status: 400 }
+  try {
+    // Fetch the ElevenLabs signed URL.
+    const elRes = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(config.agentId)}`,
+      {
+        headers: { "xi-api-key": config.elevenLabsApiKey },
+        cache: "no-store",
+        signal: AbortSignal.timeout(15_000),
+      }
     );
-  }
-  if (!agentId) {
-    return NextResponse.json(
-      { error: "agentId is required" },
-      { status: 400 }
-    );
-  }
 
-  // Fetch the ElevenLabs signed URL.
-  const elRes = await fetch(
-    `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
-    {
-      headers: { "xi-api-key": elevenLabsApiKey },
+    if (!elRes.ok) {
+      console.error("ElevenLabs API error:", elRes.status, await elRes.text());
+      return NextResponse.json(
+        { error: "Couldn't connect to the ElevenLabs agent.", nextTicket },
+        { status: 502 }
+      );
     }
-  );
 
-  if (!elRes.ok) {
-    const text = await elRes.text();
+    const { signed_url: signedUrl } = await elRes.json();
+
+    // Create an Anam session token with the ElevenLabs agent settings.
+    const sessionTokenBody = {
+      // The token can start one session (the SDK retries up to 3 times) and
+      // expires after 5 minutes, so a copied token is of little use.
+      maxSessions: 3,
+      expiresInSeconds: 300,
+      personaConfig: {
+        avatarId: config.avatarId,
+        avatarModel: "cara-4",
+        directorNotes: {
+          presetStyle: "warm",
+          expressivity: 0.5,
+        },
+      },
+      environment: {
+        elevenLabsAgentSettings: {
+          signedUrl,
+          agentId: config.agentId,
+        },
+      },
+    };
+    const anamRes = await fetch("https://api.anam.ai/v1/auth/session-token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.anamApiKey}`,
+      },
+      body: JSON.stringify(sessionTokenBody),
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!anamRes.ok) {
+      console.error("Anam API error:", anamRes.status, await anamRes.text());
+      return NextResponse.json(
+        { error: "Couldn't create the Anam session.", nextTicket },
+        { status: 502 }
+      );
+    }
+
+    const data = await anamRes.json();
+    return NextResponse.json({ sessionToken: data.sessionToken, nextTicket });
+  } catch (error) {
+    console.error("Session setup failed:", error);
     return NextResponse.json(
-      { error: `ElevenLabs API error: ${elRes.status} ${text}` },
-      { status: elRes.status }
+      { error: "Couldn't start the session. Try again.", nextTicket },
+      { status: 502 }
     );
   }
-
-  const { signed_url: signedUrl } = await elRes.json();
-
-  // Create an Anam session token with the ElevenLabs agent settings.
-  const sessionTokenBody = {
-    personaConfig: {
-      avatarId,
-      avatarModel: "cara-4",
-      directorNotes: {
-        presetStyle: "warm",
-        expressivity: 0.5,
-      },
-    },
-    environment: {
-      elevenLabsAgentSettings: {
-        signedUrl,
-        agentId,
-      },
-    },
-  };
-  const anamRes = await fetch("https://api.anam.ai/v1/auth/session-token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${anamApiKey}`,
-    },
-    body: JSON.stringify(sessionTokenBody),
-  });
-
-  if (!anamRes.ok) {
-    const text = await anamRes.text();
-    return NextResponse.json(
-      { error: `Anam API error: ${anamRes.status} ${text}` },
-      { status: anamRes.status }
-    );
-  }
-
-  const data = await anamRes.json();
-  return NextResponse.json({ sessionToken: data.sessionToken });
 }

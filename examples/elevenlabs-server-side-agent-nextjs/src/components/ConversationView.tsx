@@ -9,7 +9,12 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { AnamEvent, createClient, type AnamClient } from "@anam-ai/js-sdk";
+import {
+  AnamEvent,
+  createClient,
+  type AnamClient,
+  type EventCallbacks,
+} from "@anam-ai/js-sdk";
 
 type Status = "idle" | "connecting" | "connected" | "error";
 
@@ -49,12 +54,10 @@ function readRequiredString(
 
 export default function ConversationView({
   personaName,
-  avatarId,
-  agentId,
+  startTicket,
 }: {
   personaName: string;
-  avatarId: string;
-  agentId: string;
+  startTicket: string | null;
 }) {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -64,19 +67,23 @@ export default function ConversationView({
   const [directorNoteActivity, setDirectorNoteActivity] =
     useState<DirectorNoteActivity | null>(null);
 
-  const isConfigured = Boolean(avatarId && agentId);
+  const isConfigured = startTicket !== null;
 
   const anamClientRef = useRef<AnamClient | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
-  const unregisterToolHandlersRef = useRef<Array<() => void>>([]);
+  // The signed ticket for the next conversation. The server spends one per
+  // start and sends back a fresh one.
+  const ticketRef = useRef(startTicket);
+  // Undo functions for everything a session registers: tool handlers and
+  // event listeners.
+  const disposersRef = useRef<Array<() => void>>([]);
+  // Bumped whenever a session is torn down, so a start() that is still
+  // awaiting the server or WebRTC knows to give up.
+  const attemptRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
-
-  const clearToolHandlers = useCallback(() => {
-    unregisterToolHandlersRef.current.forEach((unregister) => unregister());
-    unregisterToolHandlersRef.current = [];
-  }, []);
 
   const clearNotificationTimer = useCallback(() => {
     if (notificationTimerRef.current !== null) {
@@ -85,13 +92,28 @@ export default function ConversationView({
     }
   }, []);
 
+  // Cancels a start in progress, removes the session's handlers and
+  // listeners, and ends the Anam session.
+  const releaseSession = useCallback(() => {
+    attemptRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+
+    disposersRef.current.forEach((dispose) => dispose());
+    disposersRef.current = [];
+
+    const anamClient = anamClientRef.current;
+    anamClientRef.current = null;
+    void anamClient?.stopStreaming().catch(() => {});
+  }, []);
+
+  // End the session and stop the microphone when the component unmounts.
   useEffect(() => {
     return () => {
-      clearToolHandlers();
+      releaseSession();
       clearNotificationTimer();
-      void anamClientRef.current?.stopStreaming();
     };
-  }, [clearNotificationTimer, clearToolHandlers]);
+  }, [clearNotificationTimer, releaseSession]);
 
   // Auto-scroll transcript to bottom when new messages arrive
   useEffect(() => {
@@ -102,12 +124,16 @@ export default function ConversationView({
 
   const start = useCallback(async () => {
     if (!isConfigured) {
-      setError(
-        "ANAM_AVATAR_ID and ELEVENLABS_AGENT_ID must be configured"
-      );
+      setError("The server is missing settings. See .env.example.");
       setStatus("error");
       return;
     }
+
+    releaseSession();
+    const attempt = attemptRef.current;
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+    const isCurrent = () => attempt === attemptRef.current;
 
     setStatus("connecting");
     setError(null);
@@ -119,21 +145,33 @@ export default function ConversationView({
       const res = await fetch("/api/anam-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ avatarId, agentId }),
+        body: JSON.stringify({ ticket: ticketRef.current }),
+        signal: abortController.signal,
       });
+      const body = await res.json().catch(() => ({}));
+      if (typeof body.nextTicket === "string") {
+        ticketRef.current = body.nextTicket;
+      }
+      if (!isCurrent()) return;
 
-      if (!res.ok) {
-        const body = await res.json();
+      if (!res.ok || typeof body.sessionToken !== "string") {
         throw new Error(body.error ?? "Failed to get session token");
       }
 
-      const { sessionToken } = await res.json();
-
-      const anamClient = createClient(sessionToken);
+      const anamClient = createClient(body.sessionToken);
       anamClientRef.current = anamClient;
 
-      clearToolHandlers();
-      unregisterToolHandlersRef.current = [
+      const listen = <K extends AnamEvent>(
+        event: K,
+        callback: EventCallbacks[K]
+      ) => {
+        anamClient.addListener(event, callback);
+        disposersRef.current.push(() =>
+          anamClient.removeListener(event, callback)
+        );
+      };
+
+      disposersRef.current.push(
         anamClient.registerToolCallHandler(
           CLIENT_TOOL_NAME,
           {
@@ -179,8 +217,8 @@ export default function ConversationView({
               });
             },
           }
-        ),
-      ];
+        )
+      );
 
       setToolActivity({
         toolCallId: "waiting",
@@ -190,59 +228,63 @@ export default function ConversationView({
           'Try saying "Show a notification that says hello".',
       });
 
-      anamClient.addListener(
-        AnamEvent.DIRECTOR_NOTE_CUE_APPLIED,
-        (evt) => {
-          setDirectorNoteActivity({
-            cueTag: evt.cueTag,
-            correlationId: evt.correlationId,
-          });
-        }
-      );
+      listen(AnamEvent.DIRECTOR_NOTE_CUE_APPLIED, (evt) => {
+        setDirectorNoteActivity({
+          cueTag: evt.cueTag,
+          correlationId: evt.correlationId,
+        });
+      });
 
       // Stream events fire on every chunk; accumulate into messages by id
-      anamClient.addListener(
-        AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED,
-        (evt: {
-          id: string;
-          content: string;
-          role: string;
-          endOfSpeech: boolean;
-          interrupted: boolean;
-        }) => {
-          setMessages((prev) => {
-            const idx = prev.findIndex((m) => m.id === evt.id);
-            if (idx >= 0) {
-              const next = [...prev];
-              next[idx] = {
-                ...next[idx],
-                content: next[idx].content + evt.content,
-                interrupted: evt.interrupted,
-              };
-              return next;
-            }
-            return [
-              ...prev,
-              {
-                id: evt.id,
-                role: evt.role as "user" | "persona",
-                content: evt.content,
-                interrupted: evt.interrupted,
-              },
-            ];
-          });
-        }
-      );
+      listen(AnamEvent.MESSAGE_STREAM_EVENT_RECEIVED, (evt) => {
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === evt.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = {
+              ...next[idx],
+              content: next[idx].content + evt.content,
+              interrupted: evt.interrupted,
+            };
+            return next;
+          }
+          return [
+            ...prev,
+            {
+              id: evt.id,
+              role: evt.role as "user" | "persona",
+              content: evt.content,
+              interrupted: evt.interrupted,
+            },
+          ];
+        });
+      });
 
-      anamClient.addListener(AnamEvent.CONNECTION_CLOSED, () => {
-        clearToolHandlers();
+      let connected = false;
+      listen(AnamEvent.CONNECTION_CLOSED, (_reason, details) => {
+        if (anamClientRef.current !== anamClient) return;
+        // The session has already ended, so release it without stopping it.
         anamClientRef.current = null;
-        setStatus("idle");
+        releaseSession();
+        if (connected) {
+          setStatus("idle");
+        } else {
+          setError(details || "The connection closed before the session started.");
+          setStatus("error");
+        }
       });
 
       await anamClient.streamToVideoElement("avatar-video");
+      if (!isCurrent()) {
+        // Stopped or unmounted while connecting: end the session we just
+        // opened.
+        void anamClient.stopStreaming().catch(() => {});
+        return;
+      }
+      connected = true;
       setStatus("connected");
     } catch (err) {
+      if (!isCurrent()) return;
       console.error("Start error:", err);
       const message =
         err instanceof Error
@@ -250,28 +292,17 @@ export default function ConversationView({
           : typeof err === "object" && err !== null
             ? JSON.stringify(err)
             : String(err);
+      releaseSession();
       setError(message);
       setStatus("error");
-      clearToolHandlers();
-      anamClientRef.current = null;
     }
-  }, [
-    clearNotificationTimer,
-    clearToolHandlers,
-    avatarId,
-    agentId,
-    isConfigured,
-  ]);
+  }, [clearNotificationTimer, isConfigured, releaseSession]);
 
-  const stop = useCallback(async () => {
-    clearToolHandlers();
-    try {
-      await anamClientRef.current?.stopStreaming();
-    } catch {}
-    anamClientRef.current = null;
+  const stop = useCallback(() => {
+    releaseSession();
     setStatus("idle");
     setMessages([]); // Clear chat messages when conversation ends
-  }, [clearToolHandlers]);
+  }, [releaseSession]);
 
 
   return (
@@ -358,8 +389,8 @@ export default function ConversationView({
               </div>
             )}
 
-            {/* Start button - show at bottom of video when idle */}
-            {status === "idle" && (
+            {/* Start button - show at bottom of video when idle or after an error */}
+            {(status === "idle" || status === "error") && (
               <div className="absolute bottom-4 sm:bottom-8 left-0 right-0 flex justify-center pointer-events-none">
                 <button
                   onClick={(e) => {
