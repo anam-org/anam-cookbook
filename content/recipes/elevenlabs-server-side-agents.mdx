@@ -12,7 +12,7 @@ authors: [robbie-anam]
 
 Anam's server-side ElevenLabs integration connects an Anam avatar to an ElevenLabs Conversational AI agent. Your server fetches a short-lived ElevenLabs signed URL and includes it when creating an Anam session token.
 
-The browser uses the Anam JavaScript SDK to start the WebRTC session and render the avatar. Anam sends conversation audio to ElevenLabs, receives the generated speech, and keeps the avatar in sync. API keys and agent IDs stay on the server, the route rejects requests from other sites, and completed sessions include recordings and transcripts in Anam Lab.
+The browser uses the Anam JavaScript SDK to start the WebRTC session and render the avatar. Anam sends conversation audio to ElevenLabs, receives the generated speech, and keeps the avatar in sync. API keys and agent IDs stay on the server, the route rejects requests from other sites and limits how many conversations start, and completed sessions include recordings and transcripts in Anam Lab.
 
 The complete example code is available at [examples/elevenlabs-server-side-agent-nextjs](https://github.com/anam-org/anam-cookbook/tree/main/examples/elevenlabs-server-side-agent-nextjs).
 
@@ -37,9 +37,10 @@ The session is split between your Next.js server, the browser, and Anam's engine
 ```
 Server:
   1. Sign a single-use start ticket (server action)
-  2. Check the request's origin and redeem the ticket
+  2. Check the request's origin, redeem the ticket and
+     apply the rate limits
   3. Fetch signed URL from ElevenLabs API
-  4. Create Anam session token with Cara 4 Director Notes
+  4. Create Anam session token with Cara-4.1 Express Director Notes
      and elevenLabsAgentSettings
 
 Client:
@@ -60,7 +61,7 @@ The Next.js route supplies the ElevenLabs settings when it creates the session t
 
 - Node.js 20.9+
 - An [Anam](https://anam.ai) account and API key (sign up free at [lab.anam.ai](https://lab.anam.ai))
-- A Cara 4 avatar from the Anam Lab Avatars page
+- An avatar that supports Cara-4.1 Express, from the Anam Lab Avatars page
 - An [ElevenLabs](https://elevenlabs.io) account with a Conversational AI agent configured via the dashboard
 
 ## Server-side setup
@@ -74,12 +75,12 @@ API keys and IDs stay server-side. The route reads the avatar ID (which face to 
 ```bash
 ANAM_API_KEY=your_anam_api_key
 ELEVENLABS_API_KEY=your_elevenlabs_api_key
-ANAM_AVATAR_ID=your_cara_4_avatar_id
+ANAM_AVATAR_ID=your_avatar_id
 ELEVENLABS_AGENT_ID=your_elevenlabs_agent_id
 # 32+ random characters. Generate one with:
 # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 SESSION_SECRET=your_random_secret
-# Optional: your public origin, if a proxy changes the Host header
+# Your public origin. Optional locally; set it in production
 # APP_ORIGIN=https://example.com
 ```
 
@@ -87,16 +88,22 @@ None of these use the `NEXT_PUBLIC_` prefix, so Next.js never sends them to the 
 
 ### Protect the route
 
-Every session uses minutes on your Anam account and your ElevenLabs agent. Without a check, any website or script could call the route and start sessions on your keys. These helpers add two checks:
+Every session uses minutes on your Anam account and your ElevenLabs agent. Without a check, any website or script could call the route and start sessions on your keys. The route makes three checks:
 
 - **Same origin.** The route rejects requests that a browser sent from another site.
 - **Start ticket.** Just before each start, a server action signs a ticket with `SESSION_SECRET`, which never leaves the server. The route accepts each ticket once, within two minutes.
+- **Rate limits.** The route caps starts per visitor and for the whole site.
 
-These checks stop other websites from using your route from a visitor's browser. They aren't user authentication and don't stop someone who scripts requests against your site. In a real app, also check your own user session in the route and rate-limit it.
+The first two stop other websites from using your route from a visitor's browser. They aren't user authentication: a script can still ask the server action for a ticket, which is why the rate limits are there too. In a real app, also check your own user session in the route and rate-limit per user.
+
+Set `APP_ORIGIN` in production. Without it, the expected origin comes from the request's own `Host` header, so any hostname that points at your server passes the check.
+
+The `server-only` import makes the build fail if a client component imports the file, so `SESSION_SECRET` can't end up in the browser bundle.
 
 ```typescript
 // lib/session-auth.ts
-// Server only: don't import this file from a client component.
+// Server only: the build fails if a client component imports this file.
+import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const TICKET_TTL_MS = 2 * 60 * 1000;
@@ -152,19 +159,18 @@ export function redeemStartTicket(ticket: unknown, now = Date.now()) {
  * Accepts only requests sent by a page on this site. Browsers always send
  * Origin on a POST from fetch(), and other sites can't change it.
  */
-export function isSameOrigin(request: Request) {
+export function isSameOrigin(request: Request, appOrigin: string | null) {
   const fetchSite = request.headers.get("sec-fetch-site");
   if (fetchSite && fetchSite !== "same-origin") return false;
 
   const origin = request.headers.get("origin");
-  return origin !== null && origin === expectedOrigin(request);
+  return origin !== null && origin === (appOrigin ?? originFromHost(request));
 }
 
-// The site's own origin, including the scheme. Set APP_ORIGIN (for example
-// https://example.com) if a proxy in front of the app changes the Host header.
-function expectedOrigin(request: Request) {
-  if (process.env.APP_ORIGIN) return new URL(process.env.APP_ORIGIN).origin;
-
+// Without APP_ORIGIN, the expected origin comes from the request's own Host
+// header, so any hostname that reaches the server passes. That's fine for
+// local development. In production, set APP_ORIGIN to your public origin.
+function originFromHost(request: Request) {
   const host = request.headers.get("host");
   if (!host) return null;
   const protocol =
@@ -173,26 +179,125 @@ function expectedOrigin(request: Request) {
   return `${protocol}://${host}`;
 }
 
-/** Reads the server-only settings. Returns null if any are missing. */
+const REQUIRED_SETTINGS = [
+  "ANAM_API_KEY",
+  "ELEVENLABS_API_KEY",
+  "ANAM_AVATAR_ID",
+  "ELEVENLABS_AGENT_ID",
+  "SESSION_SECRET",
+];
+
+/**
+ * Reads the server-only settings. Returns null, and logs why, if any are
+ * missing or invalid.
+ */
 export function readServerConfig() {
-  const config = {
-    anamApiKey: process.env.ANAM_API_KEY,
-    elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
-    avatarId: process.env.ANAM_AVATAR_ID,
-    agentId: process.env.ELEVENLABS_AGENT_ID,
-    sessionSecret: process.env.SESSION_SECRET,
+  const env = process.env;
+  const missing = REQUIRED_SETTINGS.filter((name) => !env[name]);
+  if (missing.length > 0) {
+    console.error(`Missing settings: ${missing.join(", ")}. See .env.example.`);
+    return null;
+  }
+  if (env.SESSION_SECRET!.length < 32) {
+    console.error("SESSION_SECRET must be at least 32 characters.");
+    return null;
+  }
+  if (env.APP_ORIGIN && !isOrigin(env.APP_ORIGIN)) {
+    console.error("APP_ORIGIN must be an origin such as https://example.com.");
+    return null;
+  }
+
+  return {
+    anamApiKey: env.ANAM_API_KEY!,
+    elevenLabsApiKey: env.ELEVENLABS_API_KEY!,
+    avatarId: env.ANAM_AVATAR_ID!,
+    agentId: env.ELEVENLABS_AGENT_ID!,
+    appOrigin: env.APP_ORIGIN ? new URL(env.APP_ORIGIN).origin : null,
   };
-  const complete = Object.values(config).every(Boolean);
-  if (!complete || config.sessionSecret!.length < 32) return null;
-  return config as { [K in keyof typeof config]: string };
+}
+
+// True for a bare http(s) origin such as https://example.com, with no path.
+function isOrigin(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      value.replace(/\/$/, "") === url.origin
+    );
+  } catch {
+    return false;
+  }
 }
 ```
+
+### Rate limits
+
+The ticket check doesn't stop a script that asks for a fresh ticket each time, so the route also caps conversation starts. A visitor is an ID in an httpOnly cookie. A script can drop the cookie, so the site-wide daily cap is what bounds your spend:
+
+```typescript
+// lib/rate-limit.ts
+// Caps conversation starts per visitor and for the whole site. Every session
+// uses minutes on your Anam account and your ElevenLabs agent, and the start
+// ticket doesn't stop a script that asks for a fresh ticket each time.
+//
+// The counts live in memory, so they reset when the server restarts and
+// aren't shared between instances. In production, keep them in Redis or your
+// database and update them atomically. Tune the limits to your traffic.
+
+import "server-only";
+
+type Window = { limit: number; ms: number };
+
+const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+
+const PER_VISITOR: Window[] = [
+  { limit: 6, ms: 10 * MINUTE },
+  { limit: 30, ms: DAY },
+];
+const SITE_PER_DAY: Window[] = [{ limit: 500, ms: DAY }];
+
+const counts = new Map<string, { count: number; expires: number }>();
+
+export type Verdict = { ok: true } | { ok: false; retryAfterSeconds: number };
+
+/**
+ * Checks every window before counting anything, so a refused start stores
+ * nothing and doesn't use up another window. Only accepted starts are
+ * stored, so the site's daily cap also caps the size of the map.
+ */
+export function takeStartSlot(visitorId: string, now = Date.now()): Verdict {
+  const windows = [
+    ...PER_VISITOR.map((window) => ({ ...window, key: `visitor:${visitorId}` })),
+    ...SITE_PER_DAY.map((window) => ({ ...window, key: "site" })),
+  ].map(({ key, limit, ms }) => {
+    const start = Math.floor(now / ms) * ms;
+    const id = `${key}:${ms}:${start}`;
+    return { id, limit, expires: start + ms, count: counts.get(id)?.count ?? 0 };
+  });
+  const full = windows.find((window) => window.count >= window.limit);
+  if (full) {
+    return { ok: false, retryAfterSeconds: Math.ceil((full.expires - now) / 1000) };
+  }
+
+  for (const [id, entry] of counts) if (entry.expires <= now) counts.delete(id);
+  for (const window of windows) {
+    counts.set(window.id, { count: window.count + 1, expires: window.expires });
+  }
+  return { ok: true };
+}
+```
+
+Used tickets and these counts live in memory. If you run several instances, keep the counts in Redis or your database so the limits hold across instances.
 
 ### API route
 
 ```typescript
 // app/api/anam-session/route.ts
+import { randomUUID } from "node:crypto";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { takeStartSlot } from "@/lib/rate-limit";
 import {
   isSameOrigin,
   readServerConfig,
@@ -211,18 +316,18 @@ import {
  * from the request, so a caller can't point your API keys at other agents.
  */
 export async function POST(request: Request) {
-  if (!isSameOrigin(request)) {
-    return NextResponse.json(
-      { error: "Start the conversation from this site." },
-      { status: 403 }
-    );
-  }
-
   const config = readServerConfig();
   if (!config) {
     return NextResponse.json(
-      { error: "The server is missing settings. See .env.example." },
+      { error: "The server settings are missing or invalid. See .env.example." },
       { status: 500 }
+    );
+  }
+
+  if (!isSameOrigin(request, config.appOrigin)) {
+    return NextResponse.json(
+      { error: "Start the conversation from this site." },
+      { status: 403 }
     );
   }
 
@@ -231,6 +336,36 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Couldn't verify this request. Try again." },
       { status: 401 }
+    );
+  }
+
+  // A visitor is an ID in an httpOnly cookie. A script that drops the cookie
+  // gets a new ID each time, so the site-wide cap is what bounds your spend.
+  const jar = await cookies();
+  let visitorId = jar.get("visitor")?.value;
+  if (!visitorId) {
+    visitorId = randomUUID();
+    jar.set("visitor", visitorId, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+  }
+  const verdict = takeStartSlot(visitorId);
+  if (!verdict.ok) {
+    // A wait of more than 10 minutes means a daily limit is full.
+    const error =
+      verdict.retryAfterSeconds > 600
+        ? "This demo has reached its conversation limit for today."
+        : "Please wait a few minutes before starting another conversation.";
+    return NextResponse.json(
+      { error },
+      {
+        status: 429,
+        headers: { "Retry-After": String(verdict.retryAfterSeconds) },
+      }
     );
   }
 
@@ -263,7 +398,7 @@ export async function POST(request: Request) {
       expiresInSeconds: 300,
       personaConfig: {
         avatarId: config.avatarId,
-        avatarModel: "cara-4",
+        avatarModel: "cara-4.1-express",
         directorNotes: {
           presetStyle: "warm",
           expressivity: 0.5,
@@ -307,7 +442,7 @@ export async function POST(request: Request) {
 }
 ```
 
-The `environment.elevenLabsAgentSettings` field configures ElevenLabs as the session's speech recognition, language model, and text-to-speech provider. `avatarModel` and `directorNotes` enable a warm Cara 4 performance at the start of the session.
+The `environment.elevenLabsAgentSettings` field configures ElevenLabs as the session's speech recognition, language model, and text-to-speech provider. `avatarModel` and `directorNotes` enable a warm Cara-4.1 Express performance at the start of the session.
 
 <Info>
 The signed URL is short-lived (typically valid for 15 minutes). Anam uses it immediately when the client connects, so there's no issue with expiry in normal usage. If you're pre-fetching tokens, create them just before the client needs them.
@@ -318,7 +453,7 @@ The signed URL is short-lived (typically valid for 15 minutes). Anam uses it imm
 Director Notes give the avatar a baseline performance style and temporary expression cues. The server route above starts with the `warm` preset at `0.5` expressivity. Expressivity accepts values from `0` to `1`; higher values strengthen both the active style and speech-driven motion.
 
 <Warning>
-Director Notes only work with Cara 4 avatars. Use a Cara 4 avatar ID and set `avatarModel` to `"cara-4"`, as shown in the server route above.
+Director Notes only work with Cara 4 avatars. Use an avatar ID that supports Cara-4.1 Express and set `avatarModel` to `"cara-4.1-express"`, as shown in the server route above.
 </Warning>
 
 Select **V3 Conversational** in the ElevenLabs Agent Voice settings. Expressive mode is enabled automatically for that model. Then add a short rule to the agent's system prompt:
@@ -370,42 +505,30 @@ The event contains the normalized Anam cue. For example, ElevenLabs `[laughs]` p
 
 The Anam session token API accepts additional fields that are passed through to ElevenLabs when starting the conversation. These let you personalise each session — greet users by name, switch languages, override the system prompt, or pass data to a custom LLM backend. See the [ElevenLabs personalisation overview](https://elevenlabs.io/docs/eleven-agents/customization/personalization) for full details.
 
-All of these fields are optional and go inside `elevenLabsAgentSettings` alongside `signedUrl` and `agentId`:
+All of these fields are optional. Add them to `elevenLabsAgentSettings` in the route's `sessionTokenBody`, next to `signedUrl` and `agentId`:
 
 ```typescript
-body: JSON.stringify({
-  personaConfig: { avatarId },
-  environment: {
-    elevenLabsAgentSettings: {
-      signedUrl,
-      agentId,
-      dynamicVariables: { ... },          // optional
-      conversationConfigOverride: { ... }, // optional
-      userId: "...",                       // optional
-      customLlmExtraBody: { ... },        // optional
-    },
-  },
-}),
+elevenLabsAgentSettings: {
+  signedUrl,
+  agentId: config.agentId,
+  dynamicVariables: { ... },          // optional
+  conversationConfigOverride: { ... }, // optional
+  userId: "...",                       // optional
+  customLlmExtraBody: { ... },        // optional
+},
 ```
+
+The snippets below show only the field to add.
 
 ### Dynamic variables
 
 Dynamic variables are the simplest way to personalise a conversation at runtime. Define placeholders like `{{user_name}}` in your agent's system prompt or first message in the ElevenLabs dashboard, then fill them in when creating the session token:
 
 ```typescript
-body: JSON.stringify({
-  personaConfig: { avatarId },
-  environment: {
-    elevenLabsAgentSettings: {
-      signedUrl,
-      agentId,
-      dynamicVariables: {
-        user_name: "Alice",
-        account_type: "premium",
-      },
-    },
-  },
-}),
+dynamicVariables: {
+  user_name: "Alice",
+  account_type: "premium",
+},
 ```
 
 See [ElevenLabs dynamic variables docs](https://elevenlabs.io/docs/eleven-agents/customization/personalization/dynamic-variables) for the full syntax.
@@ -415,38 +538,25 @@ See [ElevenLabs dynamic variables docs](https://elevenlabs.io/docs/eleven-agents
 Overrides let you change agent behaviour per conversation — things like the first message, language, system prompt, or TTS voice. Only include the fields you want to override; everything else keeps its default from the ElevenLabs dashboard.
 
 ```typescript
-body: JSON.stringify({
-  personaConfig: { avatarId },
-  environment: {
-    elevenLabsAgentSettings: {
-      signedUrl,
-      agentId,
-      conversationConfigOverride: {
-        agent: {
-          prompt: {
-            prompt: "You are a helpful assistant. Always respond in Spanish.",
-          },
-          firstMessage: "¡Hola! ¿En qué puedo ayudarte hoy?",
-          language: "es",
-        },
-      },
+conversationConfigOverride: {
+  agent: {
+    prompt: {
+      prompt: "You are a helpful assistant. Always respond in Spanish.",
     },
+    firstMessage: "¡Hola! ¿En qué puedo ayudarte hoy?",
+    language: "es",
   },
-}),
+},
 ```
 
 See [ElevenLabs overrides docs](https://elevenlabs.io/docs/eleven-agents/customization/personalization/overrides) for the full list of overridable fields.
 
 ### User ID
 
-Pass `userId` to identify the caller in ElevenLabs analytics and conversation history:
+Pass `userId` to identify the caller in ElevenLabs analytics and conversation history. Take it from your own user session on the server, not from the request body:
 
 ```typescript
-elevenLabsAgentSettings: {
-  signedUrl,
-  agentId,
-  userId: "user_abc123",
-},
+userId: "user_abc123",
 ```
 
 ### Custom LLM extra body
@@ -454,35 +564,34 @@ elevenLabsAgentSettings: {
 If your ElevenLabs agent is configured to call a custom LLM backend, `customLlmExtraBody` lets you pass arbitrary parameters alongside each request:
 
 ```typescript
-body: JSON.stringify({
-  personaConfig: { avatarId },
-  environment: {
-    elevenLabsAgentSettings: {
-      signedUrl,
-      agentId,
-      customLlmExtraBody: {
-        session_context: { region: "eu", tier: "enterprise" },
-      },
-    },
-  },
-}),
+customLlmExtraBody: {
+  session_context: { region: "eu", tier: "enterprise" },
+},
 ```
 
 See [ElevenLabs custom LLM docs](https://elevenlabs.io/docs/eleven-agents/customization/llm/custom-llm) for how to set up a custom LLM backend.
 
 ## Start the avatar session
 
-Add a server action that signs a start ticket. The browser calls it just before each start, so the ticket is always fresh:
+Add a server action that signs a start ticket. The browser calls it just before each start, so the ticket is always fresh. Next.js rejects server actions from other sites' pages, but a script that sends no `Origin` header still gets a ticket, so treat the ticket as a cross-site deterrent rather than authentication:
 
 ```typescript
 // app/actions.ts
 "use server";
 
-import { createStartTicket } from "@/lib/session-auth";
+import { createStartTicket, readServerConfig } from "@/lib/session-auth";
 
-// Next.js only runs server actions for same-origin requests
+/**
+ * Signs a start ticket just before the browser calls /api/anam-session.
+ *
+ * Next.js rejects a server action whose Origin header names another host, so
+ * other websites can't get tickets from their visitors' browsers. A request
+ * with no Origin header, such as one from a script, still gets a ticket. The
+ * ticket deters cross-site use; it isn't authentication, which is why the
+ * route also rate-limits starts.
+ */
 export async function getStartTicket() {
-  return createStartTicket();
+  return readServerConfig() ? createStartTicket() : null;
 }
 ```
 
@@ -493,14 +602,17 @@ import { createClient } from "@anam-ai/js-sdk";
 import { getStartTicket } from "./actions";
 
 const ticket = await getStartTicket();
+if (!ticket) throw new Error("The server settings are missing or invalid");
+
 const res = await fetch("/api/anam-session", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ ticket }),
 });
-const { sessionToken } = await res.json();
+const body = await res.json().catch(() => ({}));
+if (!res.ok) throw new Error(body.error ?? "Failed to create a session token");
 
-const client = createClient(sessionToken);
+const client = createClient(body.sessionToken);
 await client.streamToVideoElement("avatar-video");
 ```
 
@@ -540,6 +652,7 @@ export default function AvatarChat() {
   const cleanupRef = useRef<Array<() => void>>([]);
   // Bumped on every teardown, so a start() still in progress gives up
   const attemptRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   const [status, setStatus] = useState<"idle" | "connecting" | "connected">("idle");
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -547,6 +660,8 @@ export default function AvatarChat() {
   // Remove the listeners, end the session, and cancel a start in progress
   const release = useCallback(() => {
     attemptRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
     cleanupRef.current.forEach((cleanup) => cleanup());
     cleanupRef.current = [];
     const client = clientRef.current;
@@ -560,6 +675,11 @@ export default function AvatarChat() {
   const start = useCallback(async () => {
     release();
     const attempt = attemptRef.current;
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+    // Kept outside the try, so the catch can end a session that failed
+    // after Stop or unmount
+    let startedClient: AnamClient | null = null;
     setStatus("connecting");
     setMessages([]);
     setError(null);
@@ -576,10 +696,15 @@ export default function AvatarChat() {
 
       // Get a fresh, single-use ticket from the server action
       const ticket = await getStartTicket();
+      if (attempt !== attemptRef.current) return;
+      if (!ticket) throw new Error("The server settings are missing or invalid");
+
+      // Aborted if the user stops or the component unmounts first
       const res = await fetch("/api/anam-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticket }),
+        signal: abortController.signal,
       });
       const body = await res.json().catch(() => ({}));
       if (attempt !== attemptRef.current) return;
@@ -588,6 +713,7 @@ export default function AvatarChat() {
       }
 
       const anamClient = createClient(body.sessionToken);
+      startedClient = anamClient;
       clientRef.current = anamClient;
 
       // Accumulate transcript chunks by message ID
@@ -650,7 +776,12 @@ export default function AvatarChat() {
         void anamClient.stopStreaming().catch(() => {});
       }
     } catch (error) {
-      if (attempt !== attemptRef.current) return;
+      if (attempt !== attemptRef.current) {
+        // Stopped or unmounted, then the start failed: end the session too,
+        // so the server doesn't wait for it to time out
+        void startedClient?.stopStreaming().catch(() => {});
+        return;
+      }
       console.error("Failed to start the avatar session:", error);
       release();
       setError(error instanceof Error ? error.message : "Failed to start");
@@ -666,11 +797,9 @@ export default function AvatarChat() {
   return (
     <div>
       <video id="avatar-video" autoPlay playsInline />
-      <button
-        disabled={status === "connecting"}
-        onClick={status === "connected" ? stop : start}
-      >
-        {status === "connected" ? "Stop" : "Start"}
+      {/* Stop also cancels a start that hangs, such as a pending mic prompt */}
+      <button onClick={status === "idle" ? start : stop}>
+        {status === "idle" ? "Start" : status === "connecting" ? "Cancel" : "Stop"}
       </button>
       {error && <p role="alert">{error}</p>}
       <ul>
@@ -747,6 +876,17 @@ The ElevenLabs connection and API keys remain server-side when client tools are 
 - The route only accepts browser requests from a page on the same origin, including the scheme and port. Call it from your own site
 - If a proxy in front of your app changes the `Host` header, set `APP_ORIGIN` to your public origin, such as `https://example.com`
 
+**The server action fails before it runs, behind a proxy**
+- If the proxy rewrites `Host` and doesn't forward the public host in `X-Forwarded-Host`, Next.js rejects the server action. Add your public host to [`serverActions.allowedOrigins`](https://nextjs.org/docs/app/api-reference/config/next-config-js/serverActions#allowedorigins) and set `APP_ORIGIN`
+
+**"The server settings are missing or invalid." (500)**
+- The server log names the missing or invalid setting
+- `SESSION_SECRET` must be at least 32 characters
+- `APP_ORIGIN` must be an origin such as `https://example.com`, with the scheme and no path
+
+**"Please wait a few minutes before starting another conversation." (429)**
+- The visitor or the site reached a rate limit in `lib/rate-limit.ts`. Raise the limits to suit your traffic
+
 **"Couldn't verify this request. Try again." (401)**
 - Each start gets a new ticket that works once, within two minutes. Click Start again
 - Check that `SESSION_SECRET` is set, at least 32 characters, and the same on every server instance
@@ -763,7 +903,7 @@ The ElevenLabs connection and API keys remain server-side when client tools are 
 - Verify the ElevenLabs agent is active and not paused in the dashboard
 
 **Director Notes status stays "waiting"**
-- Confirm the avatar is a Cara 4 avatar and `avatarModel` is set to `cara-4`
+- Confirm the avatar supports Cara-4.1 Express and `avatarModel` is set to `cara-4.1-express`
 - Select V3 Conversational in ElevenLabs and prompt the agent to emit one of the recognized tags listed above
 - Check the response transcript in ElevenLabs to confirm the LLM produced the tag
 - Confirm the Anam engine build includes the ElevenLabs Director Notes aliases

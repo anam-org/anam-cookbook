@@ -20,8 +20,8 @@ Client (Anam JS SDK) ──WebRTC──▶ Anam ◀──WebSocket──▶ Elev
 
 ## How it works
 
-1. When you click Start, the browser asks for the microphone and gets a single-use **start ticket** from a server action, signed with `SESSION_SECRET`. The Next.js API route (`/api/anam-session`) accepts a request only from the same origin and with a valid, unused ticket. It then fetches an ElevenLabs **signed URL** using your API key and requests an Anam **session token** with `elevenLabsAgentSettings` attached. The avatar and agent IDs come from server environment variables and never reach the browser.
-2. The session token selects the Cara 4 avatar model and gives Director Notes a warm baseline style.
+1. When you click Start, the browser asks for the microphone and gets a single-use **start ticket** from a server action, signed with `SESSION_SECRET`. The Next.js API route (`/api/anam-session`) accepts a request only from the same origin, with a valid, unused ticket, and within the rate limits. It then fetches an ElevenLabs **signed URL** using your API key and requests an Anam **session token** with `elevenLabsAgentSettings` attached. The avatar and agent IDs come from server environment variables and never reach the browser.
+2. The session token selects the Cara-4.1 Express avatar model and gives Director Notes a warm baseline style.
 3. Anam uses the signed URL to open a WebSocket to ElevenLabs and manages the full voice pipeline.
 4. Supported v3 tags in the agent response are mapped to Director Notes cues, so the face follows the voice's delivery.
 5. The client creates an `AnamClient` with the session token and calls `streamToVideoElement()`. Microphone audio goes to Anam over WebRTC; the avatar video and speech audio come back over the same connection.
@@ -41,14 +41,14 @@ You need Node.js 20.9 or newer, an Anam API key, and an ElevenLabs account with 
 
 ### Enable Director Notes
 
-> Director Notes only work with **Cara 4** avatars. `ANAM_AVATAR_ID` must reference a Cara 4 avatar.
+> Director Notes only work with **Cara 4** avatars. `ANAM_AVATAR_ID` must reference an avatar that supports Cara-4.1 Express.
 
-The API route sets `avatarModel` to `cara-4` and configures a warm baseline style at `0.5` expressivity:
+The API route sets `avatarModel` to `cara-4.1-express` and configures a warm baseline style at `0.5` expressivity:
 
 ```typescript
 personaConfig: {
-  avatarId,
-  avatarModel: "cara-4",
+  avatarId: config.avatarId,
+  avatarModel: "cara-4.1-express",
   directorNotes: {
     presetStyle: "warm",
     expressivity: 0.5,
@@ -107,7 +107,7 @@ The handlers are registered in `src/components/ConversationView.tsx` before the 
 
 1. Go to [lab.anam.ai](https://lab.anam.ai) → create an account
 2. Copy your **API Key** from the API Keys page
-3. Pick a **Cara 4 Avatar ID** from the Avatars page
+3. Pick an **Avatar ID** that supports Cara-4.1 Express from the Avatars page
 
 ### Add environment variables
 
@@ -120,14 +120,14 @@ Fill in the keys for one avatar-agent pair:
 | Variable | Source |
 |---|---|
 | `ANAM_API_KEY` | lab.anam.ai → API Keys |
-| `ANAM_AVATAR_ID` | lab.anam.ai → Avatars (must be Cara 4) |
+| `ANAM_AVATAR_ID` | lab.anam.ai → Avatars (must support Cara-4.1 Express) |
 | `ELEVENLABS_API_KEY` | elevenlabs.io → API Keys |
 | `ELEVENLABS_AGENT_ID` | elevenlabs.io → Agents dashboard |
 | `SESSION_SECRET` | 32+ random characters: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `PERSONA_NAME` | Optional label shown before the session starts |
-| `APP_ORIGIN` | Optional: your public origin, such as `https://example.com`, if a proxy changes the `Host` header |
+| `APP_ORIGIN` | Your public origin, such as `https://example.com`. Optional locally; set it in production |
 
-None of these use the `NEXT_PUBLIC_` prefix, so they stay on the server.
+None of these use the `NEXT_PUBLIC_` prefix. The page sends `PERSONA_NAME` to the browser as a label, so don't put anything private in it. The others stay on the server.
 
 ### Protecting the session route
 
@@ -135,11 +135,19 @@ Every session uses minutes on your Anam account and your ElevenLabs agent, so `/
 
 - It rejects requests that a browser sent from another site. The request's `Origin`, including scheme and port, must match the site.
 - It requires a start ticket signed with `SESSION_SECRET`. The browser gets one from a server action (`src/app/actions.ts`) just before each start; tickets work once, within two minutes.
+- It limits starts to 6 per visitor in 10 minutes, 30 per visitor a day and 500 for the whole site a day (`src/lib/rate-limit.ts`). A visitor is an ID in an httpOnly cookie. A script can drop the cookie, so the site-wide cap is what bounds your spend. Tune the limits to your traffic.
 - The session token it returns allows 3 session starts (the SDK's retries) and expires after 5 minutes.
 
-The checks live in `src/lib/session-auth.ts`. Used tickets are tracked in memory, so if you deploy several instances, move that record to Redis or your database. These checks stop other websites from using the route from their visitors' browsers. They aren't user authentication and don't stop someone who scripts requests against your site: in a real app, check your own user session in the route and add rate limits.
+The checks live in `src/lib/session-auth.ts` and `src/lib/rate-limit.ts`. Both import `server-only`, so the build fails if a client component imports them. These checks stop other websites from using the route from their visitors' browsers and cap what a script can spend. They aren't user authentication: a script can still get a ticket from the server action. In a real app, check your own user session in the route and rate-limit per user.
 
-The client component requests the microphone itself, so it can release a permission grant that arrives late. It removes its event listeners and tool handlers, cancels a start in progress, and calls `stopStreaming()` when the conversation ends, the connection closes, or the component unmounts. It shows the session as connected only once WebRTC connects, and shows an error if the connection closes abnormally.
+Used tickets and rate-limit counts are kept in memory. They reset on restart and aren't shared between instances. If you deploy several instances, move the counts to Redis or your database so the limits hold. A used ticket replayed on another instance only starts the one conversation a fresh ticket would, so the ticket record matters less.
+
+#### Deploying
+
+- Set `APP_ORIGIN` to your public origin in production. Without it, the route takes the expected origin from the request's own `Host` header, so any hostname that points at your server passes the check.
+- If a proxy in front of the app rewrites the `Host` header and doesn't forward the public host in `X-Forwarded-Host`, Next.js rejects the server action before it runs. Add your public host to [`serverActions.allowedOrigins`](https://nextjs.org/docs/app/api-reference/config/next-config-js/serverActions#allowedorigins) in `next.config.ts`, and set `APP_ORIGIN`.
+
+The client component requests the microphone itself, so it can release a permission grant that arrives late. It removes its event listeners and tool handlers, cancels a start in progress, and calls `stopStreaming()` when the conversation ends, the connection closes, or the component unmounts, including when a start fails after Stop or unmount. The Stop button shows while connecting, so a start that hangs can be cancelled. The page shows the session as connected only once WebRTC connects, and shows an error if the connection closes abnormally.
 
 ### Run locally
 

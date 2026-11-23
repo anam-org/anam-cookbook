@@ -1,13 +1,16 @@
-// Server-only helpers that protect /api/anam-session. Don't import this file
-// from a client component: it reads SESSION_SECRET.
+// Server-only helpers that protect /api/anam-session. The "server-only"
+// import makes the build fail if a client component imports this file, because
+// it reads SESSION_SECRET.
 //
 // The route accepts a request only when it comes from this site (same-origin
 // check) and carries a start ticket signed with SESSION_SECRET. The browser
 // gets a fresh ticket from a server action just before each start.
-// Without them, any website or script could call the route and start sessions
-// on your Anam and ElevenLabs accounts. This isn't user authentication: in a
-// real app, also check your own user session in the route and rate-limit it.
+// These checks stop other websites from starting sessions from their
+// visitors' browsers. They aren't user authentication: a script can still
+// request a ticket, so the route also rate-limits starts (see rate-limit.ts).
+// In a real app, also check your own user session in the route.
 
+import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const TICKET_TTL_MS = 2 * 60 * 1000;
@@ -63,19 +66,18 @@ export function redeemStartTicket(ticket: unknown, now = Date.now()) {
  * Accepts only requests sent by a page on this site. Browsers always send
  * Origin on a POST from fetch(), and other sites can't change it.
  */
-export function isSameOrigin(request: Request) {
+export function isSameOrigin(request: Request, appOrigin: string | null) {
   const fetchSite = request.headers.get("sec-fetch-site");
   if (fetchSite && fetchSite !== "same-origin") return false;
 
   const origin = request.headers.get("origin");
-  return origin !== null && origin === expectedOrigin(request);
+  return origin !== null && origin === (appOrigin ?? originFromHost(request));
 }
 
-// The site's own origin, including the scheme. Set APP_ORIGIN (for example
-// https://example.com) if a proxy in front of the app changes the Host header.
-function expectedOrigin(request: Request) {
-  if (process.env.APP_ORIGIN) return new URL(process.env.APP_ORIGIN).origin;
-
+// Without APP_ORIGIN, the expected origin comes from the request's own Host
+// header, so any hostname that reaches the server passes. That's fine for
+// local development. In production, set APP_ORIGIN to your public origin.
+function originFromHost(request: Request) {
   const host = request.headers.get("host");
   if (!host) return null;
   const protocol =
@@ -84,16 +86,52 @@ function expectedOrigin(request: Request) {
   return `${protocol}://${host}`;
 }
 
-/** Reads the server-only settings. Returns null if any are missing. */
+const REQUIRED_SETTINGS = [
+  "ANAM_API_KEY",
+  "ELEVENLABS_API_KEY",
+  "ANAM_AVATAR_ID",
+  "ELEVENLABS_AGENT_ID",
+  "SESSION_SECRET",
+];
+
+/**
+ * Reads the server-only settings. Returns null, and logs why, if any are
+ * missing or invalid.
+ */
 export function readServerConfig() {
-  const config = {
-    anamApiKey: process.env.ANAM_API_KEY,
-    elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
-    avatarId: process.env.ANAM_AVATAR_ID,
-    agentId: process.env.ELEVENLABS_AGENT_ID,
-    sessionSecret: process.env.SESSION_SECRET,
+  const env = process.env;
+  const missing = REQUIRED_SETTINGS.filter((name) => !env[name]);
+  if (missing.length > 0) {
+    console.error(`Missing settings: ${missing.join(", ")}. See .env.example.`);
+    return null;
+  }
+  if (env.SESSION_SECRET!.length < 32) {
+    console.error("SESSION_SECRET must be at least 32 characters.");
+    return null;
+  }
+  if (env.APP_ORIGIN && !isOrigin(env.APP_ORIGIN)) {
+    console.error("APP_ORIGIN must be an origin such as https://example.com.");
+    return null;
+  }
+
+  return {
+    anamApiKey: env.ANAM_API_KEY!,
+    elevenLabsApiKey: env.ELEVENLABS_API_KEY!,
+    avatarId: env.ANAM_AVATAR_ID!,
+    agentId: env.ELEVENLABS_AGENT_ID!,
+    appOrigin: env.APP_ORIGIN ? new URL(env.APP_ORIGIN).origin : null,
   };
-  const complete = Object.values(config).every(Boolean);
-  if (!complete || config.sessionSecret!.length < 32) return null;
-  return config as { [K in keyof typeof config]: string };
+}
+
+// True for a bare http(s) origin such as https://example.com, with no path.
+function isOrigin(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      value.replace(/\/$/, "") === url.origin
+    );
+  } catch {
+    return false;
+  }
 }

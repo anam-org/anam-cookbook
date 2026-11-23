@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { takeStartSlot } from "@/lib/rate-limit";
 import {
   isSameOrigin,
   readServerConfig,
@@ -17,18 +20,18 @@ import {
  * from the request, so a caller can't point your API keys at other agents.
  */
 export async function POST(request: Request) {
-  if (!isSameOrigin(request)) {
-    return NextResponse.json(
-      { error: "Start the conversation from this site." },
-      { status: 403 }
-    );
-  }
-
   const config = readServerConfig();
   if (!config) {
     return NextResponse.json(
-      { error: "The server is missing settings. See .env.example." },
+      { error: "The server settings are missing or invalid. See .env.example." },
       { status: 500 }
+    );
+  }
+
+  if (!isSameOrigin(request, config.appOrigin)) {
+    return NextResponse.json(
+      { error: "Start the conversation from this site." },
+      { status: 403 }
     );
   }
 
@@ -37,6 +40,36 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Couldn't verify this request. Try again." },
       { status: 401 }
+    );
+  }
+
+  // A visitor is an ID in an httpOnly cookie. A script that drops the cookie
+  // gets a new ID each time, so the site-wide cap is what bounds your spend.
+  const jar = await cookies();
+  let visitorId = jar.get("visitor")?.value;
+  if (!visitorId) {
+    visitorId = randomUUID();
+    jar.set("visitor", visitorId, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+  }
+  const verdict = takeStartSlot(visitorId);
+  if (!verdict.ok) {
+    // A wait of more than 10 minutes means a daily limit is full.
+    const error =
+      verdict.retryAfterSeconds > 600
+        ? "This demo has reached its conversation limit for today."
+        : "Please wait a few minutes before starting another conversation.";
+    return NextResponse.json(
+      { error },
+      {
+        status: 429,
+        headers: { "Retry-After": String(verdict.retryAfterSeconds) },
+      }
     );
   }
 
@@ -69,7 +102,7 @@ export async function POST(request: Request) {
       expiresInSeconds: 300,
       personaConfig: {
         avatarId: config.avatarId,
-        avatarModel: "cara-4",
+        avatarModel: "cara-4.1-express",
         directorNotes: {
           presetStyle: "warm",
           expressivity: 0.5,
