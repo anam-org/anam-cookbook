@@ -135,10 +135,10 @@ Every session uses minutes on your Anam account and your ElevenLabs agent, so `/
 
 - It rejects requests that a browser sent from another site. The request's `Origin`, including scheme and port, must match the site.
 - It requires a start ticket signed with `SESSION_SECRET`. The browser gets one from a server action (`src/app/actions.ts`) just before each start; tickets work once, within two minutes.
-- It limits starts to 6 per visitor in 10 minutes, 30 per visitor a day and 500 for the whole site a day (`src/lib/rate-limit.ts`). A visitor is an ID in an httpOnly cookie. A script can drop the cookie, so the site-wide cap is what bounds your spend. Tune the limits to your traffic.
-- The session token it returns allows 3 session starts (the SDK's retries) and expires after 5 minutes.
+- It limits starts to 6 per visitor in 10 minutes, 30 per visitor a day and 500 for the whole site a day (`src/lib/rate-limit.ts`). A visitor is an ID in an httpOnly cookie. A script can drop the cookie, so the site-wide cap is what bounds the number of starts. Tune the limits to your traffic.
+- The session token it returns allows 3 session starts (the SDK retries a failed start up to 3 times) and must be used within 5 minutes. So the site cap bounds a day at 1,500 sessions. It doesn't limit minutes: to cap how long each session runs, add `maxSessionLengthSeconds` to `personaConfig` in the route.
 
-The checks live in `src/lib/session-auth.ts` and `src/lib/rate-limit.ts`. Both import `server-only`, so the build fails if a client component imports them. These checks stop other websites from using the route from their visitors' browsers and cap what a script can spend. They aren't user authentication: a script can still get a ticket from the server action. In a real app, check your own user session in the route and rate-limit per user.
+The checks live in `src/lib/session-auth.ts` and `src/lib/rate-limit.ts`. Both import `server-only`, so the build fails if a client component imports them. These checks stop other websites from using the route from their visitors' browsers and cap how many conversations a script can start. They aren't user authentication: a script can still get a ticket from the server action. In a real app, check your own user session in the route and rate-limit per user.
 
 Used tickets and rate-limit counts are kept in memory. They reset on restart and aren't shared between instances. If you deploy several instances, move the counts to Redis or your database so the limits hold. A used ticket replayed on another instance only starts the one conversation a fresh ticket would, so the ticket record matters less.
 

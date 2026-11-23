@@ -3,9 +3,10 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { takeStartSlot } from "@/lib/rate-limit";
 import {
+  checkStartTicket,
   isSameOrigin,
   readServerConfig,
-  redeemStartTicket,
+  spendStartTicket,
 } from "@/lib/session-auth";
 
 /**
@@ -36,15 +37,10 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
-  if (!redeemStartTicket(body?.ticket)) {
-    return NextResponse.json(
-      { error: "Couldn't verify this request. Try again." },
-      { status: 401 }
-    );
-  }
 
   // A visitor is an ID in an httpOnly cookie. A script that drops the cookie
-  // gets a new ID each time, so the site-wide cap is what bounds your spend.
+  // gets a new ID each time, so the site-wide cap is what bounds the number
+  // of starts.
   const jar = await cookies();
   let visitorId = jar.get("visitor")?.value;
   if (!visitorId) {
@@ -56,6 +52,17 @@ export async function POST(request: Request) {
       path: "/",
       maxAge: 60 * 60 * 24 * 365,
     });
+  }
+
+  // Check the ticket, take a rate-limit slot and spend the ticket with no
+  // await in between, so a ticket can't be used twice and refused requests
+  // aren't stored.
+  const ticket = checkStartTicket(body?.ticket);
+  if (!ticket) {
+    return NextResponse.json(
+      { error: "Couldn't verify this request. Try again." },
+      { status: 401 }
+    );
   }
   const verdict = takeStartSlot(visitorId);
   if (!verdict.ok) {
@@ -72,6 +79,7 @@ export async function POST(request: Request) {
       }
     );
   }
+  spendStartTicket(ticket);
 
   try {
     // Fetch the ElevenLabs signed URL.
@@ -96,8 +104,9 @@ export async function POST(request: Request) {
 
     // Create an Anam session token with the ElevenLabs agent settings.
     const sessionTokenBody = {
-      // The token can start one session (the SDK retries up to 3 times) and
-      // expires after 5 minutes, so a copied token is of little use.
+      // The token allows 3 session starts, because the SDK retries a failed
+      // start up to 3 times, and must be used within 5 minutes. To cap how
+      // long each session runs, add maxSessionLengthSeconds to personaConfig.
       maxSessions: 3,
       expiresInSeconds: 300,
       personaConfig: {

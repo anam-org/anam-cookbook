@@ -15,9 +15,10 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const TICKET_TTL_MS = 2 * 60 * 1000;
 
-// Redeemed ticket nonces, so each ticket starts one conversation. The map
-// lives in memory, so it resets on restart and isn't shared between server
-// instances. Keep it in Redis or your database if you run several instances.
+// Used ticket nonces, so each ticket starts one conversation. Only tickets
+// that passed the rate limits are stored. The map lives in memory, so it
+// resets on restart and isn't shared between server instances. Keep it in
+// Redis or your database if you run several instances.
 const redeemed = new Map<string, number>();
 
 function secret() {
@@ -38,28 +39,41 @@ export function createStartTicket(now = Date.now()) {
   return `${payload}.${sign(payload)}`;
 }
 
-/** Checks a ticket's signature and expiry, and accepts each ticket once. */
-export function redeemStartTicket(ticket: unknown, now = Date.now()) {
-  if (typeof ticket !== "string" || ticket.length > 200) return false;
+/**
+ * Checks a ticket's signature and expiry and that it hasn't been used.
+ * Returns the ticket to pass to spendStartTicket(), or null.
+ */
+export function checkStartTicket(ticket: unknown, now = Date.now()) {
+  if (typeof ticket !== "string" || ticket.length > 200) return null;
 
   const [expiresAt, nonce, signature, ...rest] = ticket.split(".");
-  if (!expiresAt || !nonce || !signature || rest.length > 0) return false;
+  if (!expiresAt || !nonce || !signature || rest.length > 0) return null;
 
   const expected = Buffer.from(sign(`${expiresAt}.${nonce}`));
   const actual = Buffer.from(signature);
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-    return false;
+    return null;
   }
 
   const expiry = Number(expiresAt);
-  if (!Number.isSafeInteger(expiry) || expiry <= now) return false;
+  if (!Number.isSafeInteger(expiry) || expiry <= now) return null;
+  if (redeemed.has(nonce)) return null;
+  return { nonce, expiry };
+}
 
+/**
+ * Records a checked ticket as used, so it can't start another conversation.
+ * Call it in the same synchronous step as checkStartTicket(), with no await
+ * in between, so two requests with one ticket can't both pass.
+ */
+export function spendStartTicket(
+  ticket: { nonce: string; expiry: number },
+  now = Date.now()
+) {
   for (const [key, keyExpiry] of redeemed) {
     if (keyExpiry <= now) redeemed.delete(key);
   }
-  if (redeemed.has(nonce)) return false;
-  redeemed.set(nonce, expiry);
-  return true;
+  redeemed.set(ticket.nonce, ticket.expiry);
 }
 
 /**

@@ -2,6 +2,10 @@
 // uses minutes on your Anam account and your ElevenLabs agent, and the start
 // ticket doesn't stop a script that asks for a fresh ticket each time.
 //
+// Each accepted start mints one session token, which allows up to 3 session
+// starts (the SDK's retries). So the site cap of 500 bounds a day at 1,500
+// sessions. It doesn't limit minutes: see maxSessionLengthSeconds in the route.
+//
 // The counts live in memory, so they reset when the server restarts and
 // aren't shared between instances. In production, keep them in Redis or your
 // database and update them atomically. Tune the limits to your traffic.
