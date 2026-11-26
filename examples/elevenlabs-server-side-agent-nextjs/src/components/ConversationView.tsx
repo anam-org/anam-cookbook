@@ -121,7 +121,7 @@ export default function ConversationView({
 
   const start = useCallback(async () => {
     if (!isConfigured) {
-      setError("The server is missing settings. See .env.example.");
+      setError("The server settings are missing or invalid. See .env.example.");
       setStatus("error");
       return;
     }
@@ -137,6 +137,10 @@ export default function ConversationView({
     setMessages([]);
     setToolActivity(null);
     setDirectorNoteActivity(null);
+
+    // Declared outside the try, so the catch can end a session that failed
+    // after Stop or unmount.
+    let startedClient: AnamClient | null = null;
 
     try {
       // Ask for the microphone here rather than inside the SDK, so a
@@ -155,7 +159,7 @@ export default function ConversationView({
       const ticket = await getStartTicket();
       if (!isCurrent()) return;
       if (!ticket) {
-        throw new Error("The server is missing settings. See .env.example.");
+        throw new Error("The server settings are missing or invalid. See .env.example.");
       }
 
       const res = await fetch("/api/anam-session", {
@@ -172,6 +176,7 @@ export default function ConversationView({
       }
 
       const anamClient = createClient(body.sessionToken);
+      startedClient = anamClient;
       anamClientRef.current = anamClient;
 
       const listen = <K extends AnamEvent>(
@@ -299,7 +304,12 @@ export default function ConversationView({
         void anamClient.stopStreaming().catch(() => {});
       }
     } catch (err) {
-      if (!isCurrent()) return;
+      if (!isCurrent()) {
+        // Stopped or unmounted while connecting, then the start failed. End
+        // the session too, so the server doesn't wait for it to time out.
+        void startedClient?.stopStreaming().catch(() => {});
+        return;
+      }
       console.error("Start error:", err);
       const message =
         err instanceof Error
@@ -427,8 +437,10 @@ export default function ConversationView({
               </div>
             )}
 
-            {/* End button - show at bottom of video when connected */}
-            {status === "connected" && (
+            {/* End button - shown while connecting too, so a start that
+                hangs (a pending mic prompt or stalled WebRTC) can be
+                cancelled */}
+            {(status === "connecting" || status === "connected") && (
               <div className="absolute bottom-4 sm:bottom-8 left-0 right-0 flex justify-center pointer-events-none">
                 <button
                   onClick={(e) => {
@@ -437,7 +449,11 @@ export default function ConversationView({
                   }}
                   className="pointer-events-auto min-w-[44px] min-h-[44px] w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-red-500/20 backdrop-blur-sm flex items-center justify-center transition-all hover:scale-110 hover:bg-red-500/30 touch-action-manipulation"
                   style={{ WebkitTapHighlightColor: "transparent" }}
-                  aria-label="End conversation"
+                  aria-label={
+                    status === "connecting"
+                      ? "Cancel conversation"
+                      : "End conversation"
+                  }
                 >
                   <svg
                     className="w-6 h-6 sm:w-7 sm:h-7 text-red-500"
