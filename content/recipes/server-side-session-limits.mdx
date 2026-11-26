@@ -1,0 +1,189 @@
+---
+title: Server-side session limits and usage metering with the Anam SDK
+description: "Hard-cap session length, gate by monthly budget, and clean up orphaned sessions — a practical pattern for metered Anam plans."
+tags: [javascript, security, intermediate]
+date: 2026-10-15
+authors: [shido6]
+---
+
+Anam's paid plans meter every session by the second — including silence. That makes two things dangerous: a browser tab that stays connected after the user walks away, and a monthly minute budget that drains faster than users expect. This recipe adds a server-side self-preservation layer around the SDK: a hard session cap enforced by Anam itself, your own usage ledger and budget gate, and a force-stop path for orphaned sessions.
+
+## What you'll build
+
+- A session-token route that mints tokens with `maxSessionLengthSeconds` — Anam cuts the stream at the limit even if your client dies.
+- A small usage ledger so you can refuse new sessions before the monthly budget is gone.
+- An "end" route the browser calls when the user hangs up, plus a force-stop route that calls Anam's session-stop API for sessions whose clients vanished.
+- A client player with a visible countdown that stops the stream gracefully when time runs out.
+
+The three layers work together: Anam enforces the cap at the engine, your server enforces the budget before minting, and your client tells the truth about when a conversation actually ended.
+
+## Prerequisites
+
+- Node.js 18+
+- An Anam account with an API key from [lab.anam.ai](https://lab.anam.ai)
+- The Anam JavaScript SDK (`@anam-ai/js-sdk`) on the client
+
+## Layer 1 — mint with a hard cap
+
+When you generate a session token, include `maxSessionLengthSeconds` in the `personaConfig`. Anam's gateway enforces this server-side: when the limit is reached, the session is cut no matter what the browser is doing.
+
+```ts
+// app/api/session/route.ts
+import { NextResponse } from "next/server";
+
+const PERSONA_ID = process.env.ANAM_PERSONA_ID!;
+const SESSION_LIMIT_SEC = 150; // your per-session cap (Anam plans have their own caps too)
+
+export async function POST(req: Request) {
+  const apiKey = process.env.ANAM_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: "not configured" }, { status: 500 });
+
+  // Budget gate: refuse to mint if the monthly allowance is gone.
+  const usage = await getUsageThisMonth();
+  if (usage.remainingSec < 10) {
+    return NextResponse.json({ error: "budget_exhausted", usage }, { status: 402 });
+  }
+
+  // One live session at a time keeps the budget predictable.
+  if (await hasActiveSession()) {
+    return NextResponse.json({ error: "session_already_active" }, { status: 409 });
+  }
+
+  const limitSec = Math.min(SESSION_LIMIT_SEC, usage.remainingSec);
+
+  // Start from the saved persona, then attach the time cap.
+  const persona = await getSavedPersona(PERSONA_ID); // your store, or GET /v1/personas/{id}
+  const response = await fetch("https://api.anam.ai/v1/auth/session-token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      personaConfig: {
+        ...persona, // name, avatarId, avatarModel, voiceId, llmId, systemPrompt
+        maxSessionLengthSeconds: limitSec,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    return NextResponse.json({ error: "mint_failed", detail: text }, { status: 502 });
+  }
+
+  const { sessionToken } = await response.json();
+
+  // Decode the JWT payload (base64url middle segment) — it carries sessionStoreId,
+  // which is the session id you pass to the stop endpoint later.
+  const payload = JSON.parse(
+    Buffer.from(sessionToken.split(".")[1], "base64url").toString("utf8")
+  );
+
+  await recordSessionStart({
+    anamSessionId: payload.sessionStoreId,
+    limitSec,
+    startedAt: new Date().toISOString(),
+  });
+
+  return NextResponse.json({ sessionToken, limitSec });
+}
+```
+
+<Tip>
+Minting a token does not start the meter — the session meters once the engine connects. Keep mint responses fast and start your ledger clock when the client reports the connection (or conservatively at mint, like this recipe).
+</Tip>
+
+## Layer 2 — tell the server when it ends
+
+When the user hangs up (or the countdown hits zero), stop the SDK stream and report the real duration. Clamp whatever the client claims to the limit you set — never trust a client with your budget math.
+
+```ts
+// app/api/session/[id]/end/route.ts
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const { elapsed_sec, reason } = await req.json();
+  const row = await getSession(params.id);
+  if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (row.endedAt) return NextResponse.json({ ok: true, alreadyEnded: true });
+
+  const durationSec = Math.min(Math.max(1, elapsed_sec ?? 0), row.limitSec);
+  await finishSession(row.id, durationSec, reason === "limit" ? "limit" : "client");
+  return NextResponse.json({ ok: true, durationSec });
+}
+```
+
+## Layer 3 — force-stop orphaned sessions
+
+If a laptop lid closes mid-conversation, nobody calls `/end`. Two backstops cover it:
+
+1. A periodic sweeper on your server: any session past `limitSec + grace` gets force-stopped and closed in your ledger.
+2. Anam's stop endpoint, which terminates a running session server-side:
+
+```ts
+async function forceStopAnamSession(anamSessionId: string, apiKey: string) {
+  const resp = await fetch(
+    `https://api.anam.ai/v1/sessions/${anamSessionId}/stop`,
+    { method: "POST", headers: { Authorization: `Bearer ${apiKey}` } }
+  );
+  // 404 here simply means the session never reached an engine (minted but
+  // never connected) — record it and move on, nothing was billed.
+  return resp.status;
+}
+```
+
+A reasonable sweep interval is 30 seconds with a grace window of 15 seconds past the limit. Mark swept rows with a distinct reason (`swept` vs `client`) so your usage reports stay honest.
+
+## The client — countdown you can trust
+
+Start the clock when the connection is established, not when the component mounts. Compute remaining time from an absolute deadline (`Date.now() + limitSec * 1000`) so background-tab timer throttling cannot stretch the session. When it hits zero, stop the stream and call your `/end` route.
+
+```tsx
+import { createClient, AnamEvent, ConnectionClosedCode } from "@anam-ai/js-sdk";
+
+const client = createClient(sessionToken);
+const deadline = Date.now() + limitSec * 1000;
+
+client.addListener(AnamEvent.CONNECTION_ESTABLISHED, () => {
+  const tick = setInterval(() => {
+    const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    setSecondsLeft(left);
+    if (left <= 0) {
+      clearInterval(tick);
+      client.stopStreaming();
+      fetch(`/api/session/${sessionId}/end`, {
+        method: "POST",
+        body: JSON.stringify({ elapsed_sec: limitSec, reason: "limit" }),
+      });
+    }
+  }, 500);
+});
+
+client.addListener(AnamEvent.CONNECTION_CLOSED, (reason, details) => {
+  if (reason !== ConnectionClosedCode.NORMAL) {
+    // Abnormal close — report what you have; the sweeper backstops the rest.
+    console.warn("connection closed", details);
+  }
+});
+
+await client.streamToVideoElement("persona-video");
+```
+
+Show the countdown in the UI (`{secondsLeft}s left`) and offer an explicit **End conversation** button that calls `client.stopStreaming()` and the same `/end` route. Users who know the meter is running make better choices about it.
+
+## Putting the layers together
+
+| Failure | Layer that catches it |
+| --- | --- |
+| User closes the tab mid-session | Sweeper → force-stop API → ledger close |
+| Countdown hits zero while talking | Client `stopStreaming` + `/end` with `reason: "limit"` |
+| Client JS never loads | `maxSessionLengthSeconds` hard cut at Anam's engine |
+| Monthly budget is gone | Your gate refuses the mint with 402 before any Anam call |
+| User tries to start two sessions | Single-active check refuses with 409 |
+
+Metering by the second is the honest default for Anam's plans; the layers above keep your side of the ledger honest too — every second charged traces back to a session row you started, capped, and closed on purpose.
+
+## Ideas to extend this
+
+- Store the ledger in your database instead of the sketch's helpers, and break usage reports down by user or tenant.
+- Add a "pending" state: start charging at engine connect (a client `CONNECTION_ESTABLISHED` → `POST /session/:id/activate`) instead of at mint.
+- Surface remaining monthly minutes in your UI so power users can pace themselves before the 402 ever fires.
